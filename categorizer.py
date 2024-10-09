@@ -4,6 +4,9 @@ from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.naive_bayes import MultinomialNB
 import io
 
+# Automatically open in wide mode
+st.set_page_config(layout="wide")
+
 # Step 1: Load the training data from the specified CSV file
 training_file_path = '/Users/ybkmykeyz/Documents/Cat Examples.csv'
 training_data = pd.read_csv(training_file_path)
