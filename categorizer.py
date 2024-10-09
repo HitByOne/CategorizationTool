@@ -3,7 +3,7 @@ import pandas as pd
 from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.naive_bayes import MultinomialNB
 import gspread
-from oauth2client.service_account import ServiceAccountCredentials
+from google.oauth2.service_account import Credentials
 import io
 
 # Automatically open in wide mode
@@ -13,7 +13,7 @@ st.set_page_config(layout="wide")
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 
 # Use credentials from Streamlit secrets
-creds = {
+creds_dict = {
     "type": st.secrets["gsheets"]["type"],
     "project_id": st.secrets["gsheets"]["project_id"],
     "private_key_id": st.secrets["gsheets"]["private_key_id"],
@@ -26,7 +26,8 @@ creds = {
     "client_x509_cert_url": st.secrets["gsheets"]["client_x509_cert_url"]
 }
 
-client = gspread.service_account_from_dict(creds)
+credentials = Credentials.from_service_account_info(creds_dict, scopes=scope)
+client = gspread.authorize(credentials)
 
 # Load ISN Category List from Google Sheets
 sheet_url = 'https://docs.google.com/spreadsheets/d/1u2r5fRh0sEXXkudSvwyS41rRzF-LIQjE/edit?usp=sharing&ouid=101090486103714461716&rtpof=true&sd=true'
