@@ -11,8 +11,22 @@ st.set_page_config(layout="wide")
 
 # Step 1: Connect to Google Sheets and load the ISN Category List
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-creds = ServiceAccountCredentials.from_json_keyfile_name('credentials.json', scope)
-client = gspread.authorize(creds)
+
+# Use credentials from Streamlit secrets
+creds = {
+    "type": st.secrets["gsheets"]["type"],
+    "project_id": st.secrets["gsheets"]["project_id"],
+    "private_key_id": st.secrets["gsheets"]["private_key_id"],
+    "private_key": st.secrets["gsheets"]["private_key"].replace("\\n", "\n"),  # Handle newlines in private key
+    "client_email": st.secrets["gsheets"]["client_email"],
+    "client_id": st.secrets["gsheets"]["client_id"],
+    "auth_uri": st.secrets["gsheets"]["auth_uri"],
+    "token_uri": st.secrets["gsheets"]["token_uri"],
+    "auth_provider_x509_cert_url": st.secrets["gsheets"]["auth_provider_x509_cert_url"],
+    "client_x509_cert_url": st.secrets["gsheets"]["client_x509_cert_url"]
+}
+
+client = gspread.service_account_from_dict(creds)
 
 # Load ISN Category List from Google Sheets
 sheet_url = 'https://docs.google.com/spreadsheets/d/1u2r5fRh0sEXXkudSvwyS41rRzF-LIQjE/edit?usp=sharing&ouid=101090486103714461716&rtpof=true&sd=true'
