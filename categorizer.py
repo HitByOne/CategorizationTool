@@ -2,48 +2,21 @@ import streamlit as st
 import pandas as pd
 from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.naive_bayes import MultinomialNB
-import gspread
-from google.oauth2.service_account import Credentials
+import gdown
 import io
 
 # Automatically open in wide mode
 st.set_page_config(layout="wide")
 
-# Step 1: Connect to Google Sheets and load the ISN Category List
-scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+# Step 1: Download the training data from Google Drive
+file_url = 'https://drive.google.com/uc?id=1MmnakF0kEnN5t-E3_RCuKlZjmsCfhFtv'
+output_file = '/tmp/training_data.csv'  # Local path to save the file
 
-# Use credentials from Streamlit secrets
-creds_dict = {
-    "type": st.secrets["gsheets"]["type"],
-    "project_id": st.secrets["gsheets"]["project_id"],
-    "private_key_id": st.secrets["gsheets"]["private_key_id"],
-    "private_key": st.secrets["gsheets"]["private_key"].replace("\\n", "\n"),  # Handle newlines in private key
-    "client_email": st.secrets["gsheets"]["client_email"],
-    "client_id": st.secrets["gsheets"]["client_id"],
-    "auth_uri": st.secrets["gsheets"]["auth_uri"],
-    "token_uri": st.secrets["gsheets"]["token_uri"],
-    "auth_provider_x509_cert_url": st.secrets["gsheets"]["auth_provider_x509_cert_url"],
-    "client_x509_cert_url": st.secrets["gsheets"]["client_x509_cert_url"]
-}
+# Download the file using gdown
+gdown.download(file_url, output_file, quiet=False)
 
-credentials = Credentials.from_service_account_info(creds_dict, scopes=scope)
-client = gspread.authorize(credentials)
-
-# Load ISN Category List from Google Sheets
-sheet_url = 'https://docs.google.com/spreadsheets/d/1u2r5fRh0sEXXkudSvwyS41rRzF-LIQjE/edit?usp=sharing&ouid=101090486103714461716&rtpof=true&sd=true'
-sheet = client.open_by_url(sheet_url)
-worksheet = sheet.get_worksheet(0)
-data = worksheet.get_all_records()
-isn_category_data = pd.DataFrame(data)
-
-# Create a mapping from Subcategory to Subcategory-ID
-subcategory_id_mapping = isn_category_data.set_index('Subcategory')['Subcategory-ID'].to_dict()
-
-# Step 2: Load the training data from Google Sheets (similar to ISN Category List)
-training_sheet_url = 'YOUR_TRAINING_DATA_GOOGLE_SHEET_URL'
-training_sheet = client.open_by_url(training_sheet_url)
-training_worksheet = training_sheet.get_worksheet(0)
-training_data = pd.DataFrame(training_worksheet.get_all_records())
+# Step 2: Load the training data
+training_data = pd.read_csv(output_file)
 
 # Handle missing values in the item_name and Subcategory columns
 training_data = training_data.dropna(subset=['item_name', 'Subcategory'])
@@ -66,9 +39,8 @@ def predict_top_three_subcategory_ids(item_description):
     
     # Get the Subcategory-IDs for the top three predicted categories
     top_three_categories = [model.classes_[i] for i in top_three_indices]
-    top_three_subcategory_ids = [subcategory_id_mapping.get(cat, 'N/A') for cat in top_three_categories]
     
-    return top_three_subcategory_ids
+    return top_three_categories
 
 # Step 6: Streamlit App UI
 st.title("Item Categorization with Auto-Suggestion")
@@ -86,13 +58,6 @@ if st.button("Get Category Suggestions for Manual Entry"):
         # Auto-Suggest Top Three Subcategory-IDs based on manual input
         df['Suggested Subcategory-IDs'] = df['Item'].apply(lambda x: predict_top_three_subcategory_ids(x))
         
-        # Expand the result to display Subcategory-IDs for each suggestion
-        expanded_df = pd.DataFrame(df['Suggested Subcategory-IDs'].to_list(), 
-                                   index=df.index, 
-                                   columns=['Subcategory-ID 1', 'Subcategory-ID 2', 'Subcategory-ID 3'])
-        
-        df = pd.concat([df, expanded_df], axis=1)
-
         # Display the categorized DataFrame
         st.write("### Final Categorized Items")
         st.dataframe(df)
@@ -111,70 +76,3 @@ if st.button("Get Category Suggestions for Manual Entry"):
         )
     else:
         st.warning("Please enter some item names before pressing the button.")
-
-# Option 2: File upload for batch search
-st.header("Option 2: Upload Excel File")
-
-# Download template for Excel upload
-st.subheader("Download Excel Template")
-def generate_template():
-    # Create a template with 'Item Number' and 'Description' columns
-    template_df = pd.DataFrame(columns=['Item Number', 'Description'])
-    
-    # Convert template DataFrame to Excel in-memory
-    buffer = io.BytesIO()
-    with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
-        template_df.to_excel(writer, index=False)
-    buffer.seek(0)
-    return buffer
-
-st.download_button(
-    label="Download Template",
-    data=generate_template(),
-    file_name="item_categorization_template.xlsx",
-    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-)
-
-# File upload section
-uploaded_file = st.file_uploader("Upload an Excel file with 'Item Number' and 'Description' columns", type="xlsx")
-
-if uploaded_file is not None:
-    # Load the uploaded file into a DataFrame
-    input_data = pd.read_excel(uploaded_file)
-    
-    # Check if the necessary columns are in the file
-    if 'Item Number' in input_data.columns and 'Description' in input_data.columns:
-        st.write("### Uploaded Data")
-        st.dataframe(input_data.head())
-        
-        # Auto-Suggest Top Three Subcategory-IDs based on the Description
-        input_data['Suggested Subcategory-IDs'] = input_data['Description'].apply(lambda x: predict_top_three_subcategory_ids(x))
-        
-        # Expand the result to display Subcategory-IDs for each suggestion
-        expanded_df = pd.DataFrame(input_data['Suggested Subcategory-IDs'].to_list(), 
-                                   index=input_data.index, 
-                                   columns=['Subcategory-ID 1', 'Subcategory-ID 2', 'Subcategory-ID 3'])
-        
-        # Merge the results back into the original data
-        final_df = pd.concat([input_data[['Item Number', 'Description']], expanded_df], axis=1)
-
-        # Display the final categorized DataFrame
-        st.write("### Final Categorized Items from Excel")
-        st.dataframe(final_df)
-
-        # Export categorized data
-        def convert_df(df):
-            return df.to_csv(index=False).encode('utf-8')
-
-        csv = convert_df(final_df)
-        st.download_button(
-            "Download Categorized Data",
-            csv,
-            "categorized_items_excel.csv",
-            "text/csv",
-            key='download-csv-excel'
-        )
-    else:
-        st.warning("The uploaded file must contain 'Item Number' and 'Description' columns.")
-else:
-    st.info("Please upload an Excel file to get started.")
