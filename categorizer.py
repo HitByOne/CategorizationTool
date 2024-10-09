@@ -21,9 +21,6 @@ training_data = pd.read_csv(output_file)
 # Handle missing values in the item_name and Subcategory columns
 training_data = training_data.dropna(subset=['item_name', 'Subcategory'])
 
-# Create a mapping from Subcategory to Subcategory-ID
-subcategory_id_mapping = dict(zip(training_data['Subcategory'], training_data['Subcategory-ID']))
-
 # Step 3: Preprocess and vectorize the item descriptions
 X_train = training_data['item_name']  # The item descriptions
 y_train = training_data['Subcategory']  # The corresponding categories
@@ -43,10 +40,7 @@ def predict_top_three_subcategory_ids(item_description):
     # Get the Subcategory-IDs for the top three predicted categories
     top_three_categories = [model.classes_[i] for i in top_three_indices]
     
-    # Map predicted subcategories to Subcategory-ID
-    top_three_subcategory_ids = [subcategory_id_mapping.get(cat, 'N/A') for cat in top_three_categories]
-    
-    return top_three_subcategory_ids
+    return top_three_categories
 
 # Step 6: Streamlit App UI
 st.title("Item Categorization with Auto-Suggestion")
