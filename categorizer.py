@@ -58,6 +58,13 @@ if st.button("Get Category Suggestions for Manual Entry"):
         # Auto-Suggest Top Three Subcategory-IDs based on manual input
         df['Suggested Subcategory-IDs'] = df['Item'].apply(lambda x: predict_top_three_subcategory_ids(x))
         
+        # Expand the result to display Subcategory-IDs for each suggestion
+        expanded_df = pd.DataFrame(df['Suggested Subcategory-IDs'].to_list(), 
+                                   index=df.index, 
+                                   columns=['Subcategory-ID 1', 'Subcategory-ID 2', 'Subcategory-ID 3'])
+        
+        df = pd.concat([df, expanded_df], axis=1)
+
         # Display the categorized DataFrame
         st.write("### Final Categorized Items")
         st.dataframe(df)
@@ -76,3 +83,70 @@ if st.button("Get Category Suggestions for Manual Entry"):
         )
     else:
         st.warning("Please enter some item names before pressing the button.")
+
+# Option 2: File upload for batch search
+st.header("Option 2: Upload Excel File")
+
+# Download template for Excel upload
+st.subheader("Download Excel Template")
+def generate_template():
+    # Create a template with 'Item Number' and 'Description' columns
+    template_df = pd.DataFrame(columns=['Item Number', 'Description'])
+    
+    # Convert template DataFrame to Excel in-memory
+    buffer = io.BytesIO()
+    with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+        template_df.to_excel(writer, index=False)
+    buffer.seek(0)
+    return buffer
+
+st.download_button(
+    label="Download Template",
+    data=generate_template(),
+    file_name="item_categorization_template.xlsx",
+    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+)
+
+# File upload section
+uploaded_file = st.file_uploader("Upload an Excel file with 'Item Number' and 'Description' columns", type="xlsx")
+
+if uploaded_file is not None:
+    # Load the uploaded file into a DataFrame
+    input_data = pd.read_excel(uploaded_file)
+    
+    # Check if the necessary columns are in the file
+    if 'Item Number' in input_data.columns and 'Description' in input_data.columns:
+        st.write("### Uploaded Data")
+        st.dataframe(input_data.head())
+        
+        # Auto-Suggest Top Three Subcategory-IDs based on the Description
+        input_data['Suggested Subcategory-IDs'] = input_data['Description'].apply(lambda x: predict_top_three_subcategory_ids(x))
+        
+        # Expand the result to display Subcategory-IDs for each suggestion
+        expanded_df = pd.DataFrame(input_data['Suggested Subcategory-IDs'].to_list(), 
+                                   index=input_data.index, 
+                                   columns=['Subcategory-ID 1', 'Subcategory-ID 2', 'Subcategory-ID 3'])
+        
+        # Merge the results back into the original data
+        final_df = pd.concat([input_data[['Item Number', 'Description']], expanded_df], axis=1)
+
+        # Display the final categorized DataFrame
+        st.write("### Final Categorized Items from Excel")
+        st.dataframe(final_df)
+
+        # Export categorized data
+        def convert_df(df):
+            return df.to_csv(index=False).encode('utf-8')
+
+        csv = convert_df(final_df)
+        st.download_button(
+            "Download Categorized Data",
+            csv,
+            "categorized_items_excel.csv",
+            "text/csv",
+            key='download-csv-excel'
+        )
+    else:
+        st.warning("The uploaded file must contain 'Item Number' and 'Description' columns.")
+else:
+    st.info("Please upload an Excel file to get started.")
