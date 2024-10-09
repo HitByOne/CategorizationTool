@@ -2,23 +2,35 @@ import streamlit as st
 import pandas as pd
 from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.naive_bayes import MultinomialNB
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
 import io
 
 # Automatically open in wide mode
 st.set_page_config(layout="wide")
 
-# Step 1: Load the training data from the specified CSV file
-training_file_path = '/Users/ybkmykeyz/Documents/Cat Examples.csv'
-training_data = pd.read_csv(training_file_path)
+# Step 1: Connect to Google Sheets and load the ISN Category List
+scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+creds = ServiceAccountCredentials.from_json_keyfile_name('credentials.json', scope)
+client = gspread.authorize(creds)
 
-# Load the ISN Category List file to retrieve Subcategory-ID
-isn_category_file_path = '/Users/ybkmykeyz/Documents/ISN Category List.xlsx'
-isn_category_data = pd.read_excel(isn_category_file_path)
+# Load ISN Category List from Google Sheets
+sheet_url = 'https://docs.google.com/spreadsheets/d/1u2r5fRh0sEXXkudSvwyS41rRzF-LIQjE/edit?usp=sharing&ouid=101090486103714461716&rtpof=true&sd=true'
+sheet = client.open_by_url(sheet_url)
+worksheet = sheet.get_worksheet(0)
+data = worksheet.get_all_records()
+isn_category_data = pd.DataFrame(data)
 
 # Create a mapping from Subcategory to Subcategory-ID
 subcategory_id_mapping = isn_category_data.set_index('Subcategory')['Subcategory-ID'].to_dict()
 
-# Step 2: Handle missing values in the item_name and Subcategory columns
+# Step 2: Load the training data from Google Sheets (similar to ISN Category List)
+training_sheet_url = 'YOUR_TRAINING_DATA_GOOGLE_SHEET_URL'
+training_sheet = client.open_by_url(training_sheet_url)
+training_worksheet = training_sheet.get_worksheet(0)
+training_data = pd.DataFrame(training_worksheet.get_all_records())
+
+# Handle missing values in the item_name and Subcategory columns
 training_data = training_data.dropna(subset=['item_name', 'Subcategory'])
 
 # Step 3: Preprocess and vectorize the item descriptions
