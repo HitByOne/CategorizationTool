@@ -5,15 +5,6 @@ from sklearn.naive_bayes import MultinomialNB
 import gdown
 import io
 
-import subprocess
-import sys
-
-# Install openpyxl if it's not available
-try:
-    import openpyxl
-except ImportError:
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "openpyxl"])
-
 # Automatically open in wide mode
 st.set_page_config(layout="wide")
 
