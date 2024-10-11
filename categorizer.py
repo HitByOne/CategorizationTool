@@ -1,152 +1,232 @@
 import streamlit as st
 import pandas as pd
-from sklearn.feature_extraction.text import CountVectorizer
-from sklearn.naive_bayes import MultinomialNB
-import gdown
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.svm import LinearSVC
+from sklearn.pipeline import Pipeline
+import joblib
 import io
+import numpy as np
 
-# Automatically open in wide mode
-st.set_page_config(layout="wide")
+# Set Streamlit page configuration
+st.set_page_config(layout="wide", page_title="Hierarchical Item Categorization")
 
-# Step 1: Download the training data from Google Drive
-file_url = 'https://drive.google.com/uc?id=1MmnakF0kEnN5t-E3_RCuKlZjmsCfhFtv'
-output_file = '/tmp/training_data.csv'  # Local path to save the file
+# Constants
+CSV_URL = "https://drive.google.com/uc?id=1cnau3XSlOjG4m9RZyk5UXTVakwPfuori&export=download"
+REQUIRED_COLUMNS = ['Product Title', 'Category', 'Subcategory', 'Part Terminology ID - Name']
 
-# Download the file using gdown
-gdown.download(file_url, output_file, quiet=False)
+# Utility Functions
+@st.cache_data
+def load_data(url):
+    try:
+        data = pd.read_csv(url)
+        return data
+    except Exception as e:
+        st.error(f"Error loading data: {e}")
+        st.stop()
 
-# Step 2: Load the training data
-training_data = pd.read_csv(output_file)
+@st.cache_resource
+def train_category_model(X, y):
+    pipeline = Pipeline([
+        ('tfidf', TfidfVectorizer(stop_words='english', ngram_range=(1, 2))),
+        ('svm', LinearSVC(C=1.0))
+    ])
+    pipeline.fit(X, y)
+    return pipeline
 
-# Handle missing values in the item_name and Subcategory columns
-training_data = training_data.dropna(subset=['item_name', 'Subcategory'])
+@st.cache_resource
+def train_subcategory_models(training_data):
+    subcat_models = {}
+    for category in training_data['Category'].unique():
+        category_data = training_data[training_data['Category'] == category]
+        X_subcat_train = category_data['Product Title']
+        y_subcat_train = category_data['Subcategory']
+        pipeline = Pipeline([
+            ('tfidf', TfidfVectorizer(stop_words='english', ngram_range=(1, 2))),
+            ('svm', LinearSVC(C=1.0))
+        ])
+        pipeline.fit(X_subcat_train, y_subcat_train)
+        subcat_models[category] = pipeline
+    return subcat_models
 
-# Step 3: Preprocess and vectorize the item descriptions
-X_train = training_data['item_name']  # The item descriptions
-y_train = training_data['Subcategory']  # The corresponding categories
-vectorizer = CountVectorizer()
-X_train_vectorized = vectorizer.fit_transform(X_train)
+@st.cache_resource
+def train_part_terminology_models(training_data):
+    part_term_models = {}
+    for subcategory in training_data['Subcategory'].unique():
+        subcat_data = training_data[training_data['Subcategory'] == subcategory]
+        X_part_term_train = subcat_data['Product Title']
+        y_part_term_train = subcat_data['Part Terminology ID - Name']
+        if y_part_term_train.nunique() > 1:
+            pipeline = Pipeline([
+                ('tfidf', TfidfVectorizer(stop_words='english', ngram_range=(1, 2))),
+                ('svm', LinearSVC(C=1.0))
+            ])
+            pipeline.fit(X_part_term_train, y_part_term_train)
+            part_term_models[subcategory] = pipeline
+        else:
+            part_term_models[subcategory] = y_part_term_train.unique()[0]
+    return part_term_models
 
-# Step 4: Train the Naive Bayes model
-model = MultinomialNB()
-model.fit(X_train_vectorized, y_train)
-
-# Step 5: Define a function to predict the top three Subcategory-IDs for new items
-def predict_top_three_subcategory_ids(item_description):
-    X_new = vectorizer.transform([item_description])
-    predicted_proba = model.predict_proba(X_new)[0]
-    top_three_indices = predicted_proba.argsort()[-3:][::-1]  # Get the top three predictions
+def hierarchical_prediction(item_description, category_pipeline, subcat_models, part_term_models):
+    try:
+        predicted_category = category_pipeline.predict([item_description])[0]
+    except Exception:
+        predicted_category = 'Error in Category Prediction'
     
-    # Get the Subcategory-IDs for the top three predicted categories
-    top_three_categories = [model.classes_[i] for i in top_three_indices]
+    # Step 2: Predict Subcategory based on Category and return top 3 predictions
+    try:
+        if predicted_category in subcat_models:
+            subcat_model = subcat_models[predicted_category]
+            decision_scores = subcat_model.decision_function([item_description])
+            top_3_subcategories_indices = np.argsort(decision_scores[0])[-3:][::-1]
+            top_3_subcategories = subcat_model.classes_[top_3_subcategories_indices]
+        else:
+            top_3_subcategories = ['Unknown Subcategory']
+    except Exception:
+        top_3_subcategories = ['Error in Subcategory Prediction']
     
-    return top_three_categories
+    # Ensure we have 3 subcategories
+    while len(top_3_subcategories) < 3:
+        top_3_subcategories = np.append(top_3_subcategories, 'N/A')
+    
+    # Step 3: Predict top 3 Part Terminologies based on the top subcategory
+    predicted_subcategory = top_3_subcategories[0]  # Use the top predicted subcategory
+    try:
+        if predicted_subcategory in part_term_models:
+            if isinstance(part_term_models[predicted_subcategory], str):
+                top_3_part_terms = [part_term_models[predicted_subcategory]] * 3  # If there's only one class
+            else:
+                part_term_model = part_term_models[predicted_subcategory]
+                decision_scores_part_term = part_term_model.decision_function([item_description])
+                top_3_part_term_indices = np.argsort(decision_scores_part_term[0])[-3:][::-1]
+                top_3_part_terms = part_term_model.classes_[top_3_part_term_indices]
+        else:
+            top_3_part_terms = ['Unknown Part Terminology']
+    except Exception:
+        top_3_part_terms = ['Error in Part Terminology Prediction']
+    
+    # Ensure we have 3 part terminologies
+    while len(top_3_part_terms) < 3:
+        top_3_part_terms = np.append(top_3_part_terms, 'N/A')
+    
+    # Return top 3 subcategories and top 3 part terminologies
+    return top_3_subcategories[0], top_3_subcategories[1], top_3_subcategories[2], top_3_part_terms[0], top_3_part_terms[1], top_3_part_terms[2]
 
-# Step 6: Streamlit App UI
-st.title("Item Categorization with Auto-Suggestion")
-
-# Option 1: Textbox input for manual search
-st.header("Option 1: Manual Entry")
-item_input = st.text_area("Enter item names (one per line)", value="", height=150)
-items = [item.strip() for item in item_input.split("\n") if item.strip()]
-
-if st.button("Get Category Suggestions for Manual Entry"):
-    if items:
-        # Create a DataFrame for entered items
-        df = pd.DataFrame({'Item': items})
-        
-        # Auto-Suggest Top Three Subcategory-IDs based on manual input
-        df['Suggested Subcategory-IDs'] = df['Item'].apply(lambda x: predict_top_three_subcategory_ids(x))
-        
-        # Expand the result to display Subcategory-IDs for each suggestion
-        expanded_df = pd.DataFrame(df['Suggested Subcategory-IDs'].to_list(), 
-                                   index=df.index, 
-                                   columns=['Subcategory-ID 1', 'Subcategory-ID 2', 'Subcategory-ID 3'])
-        
-        df = pd.concat([df, expanded_df], axis=1)
-
-        # Display the categorized DataFrame
-        st.write("### Final Categorized Items")
-        st.dataframe(df)
-
-        # Export categorized data
-        def convert_df(df):
-            return df.to_csv(index=False).encode('utf-8')
-
-        csv = convert_df(df)
-        st.download_button(
-            "Download Categorized Data",
-            csv,
-            "categorized_items_manual.csv",
-            "text/csv",
-            key='download-csv-manual'
-        )
-    else:
-        st.warning("Please enter some item names before pressing the button.")
-
-# Option 2: File upload for batch search
-st.header("Option 2: Upload Excel File")
-
-# Download template for Excel upload
-st.subheader("Download Excel Template")
 def generate_template():
-    # Create a template with 'Item Number' and 'Description' columns
     template_df = pd.DataFrame(columns=['Item Number', 'Description'])
-    
-    # Convert template DataFrame to Excel in-memory
     buffer = io.BytesIO()
     with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
         template_df.to_excel(writer, index=False)
     buffer.seek(0)
     return buffer
 
+# Load and preprocess data
+training_data = load_data(CSV_URL)
+
+# Check for required columns
+missing_columns = [col for col in REQUIRED_COLUMNS if col not in training_data.columns]
+if missing_columns:
+    st.error(f"Training data is missing the following columns: {', '.join(missing_columns)}")
+    st.stop()
+
+# Handle missing values
+training_data['Product Title'] = training_data['Product Title'].fillna('')
+training_data = training_data.dropna(subset=['Category', 'Subcategory', 'Part Terminology ID - Name'])
+
+# Train models
+with st.spinner("Training Category model..."):
+    category_pipeline = train_category_model(training_data['Product Title'], training_data['Category'])
+
+with st.spinner("Training Subcategory models..."):
+    subcat_models = train_subcategory_models(training_data)
+
+with st.spinner("Training Part Terminology models..."):
+    part_term_models = train_part_terminology_models(training_data)
+
+# Streamlit App UI
+st.title("📦 Hierarchical Item Categorization")
+
+st.markdown("""
+This application categorizes items hierarchically into **Subcategory** and **Part Terminology** based on their descriptions.
+You can either manually enter item descriptions or upload an Excel file for batch predictions.
+""")
+
+# Option 1: Manual Entry
+st.header("🔹 Option 1: Manual Entry")
+item_input = st.text_area("Enter item descriptions (one per line):", height=150)
+items = [item.strip() for item in item_input.split("\n") if item.strip()]
+
+if st.button("Get Hierarchical Predictions for Manual Entry"):
+    if items:
+        with st.spinner("Processing..."):
+            df_manual = pd.DataFrame({'Item': items})
+            predictions = df_manual['Item'].apply(
+                lambda x: pd.Series(hierarchical_prediction(x, category_pipeline, subcat_models, part_term_models))
+            )
+            # Assign the predictions to the correct columns
+            df_manual[['Predicted Subcategory 1', 'Predicted Subcategory 2', 'Predicted Subcategory 3', 
+                       'Predicted Part Terminology 1', 'Predicted Part Terminology 2', 'Predicted Part Terminology 3']] = predictions
+            st.success("### Predicted Subcategories and Part Terminologies")
+            st.dataframe(df_manual)
+            
+            # Export as CSV
+            csv_manual = df_manual.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                "📥 Download Predictions as CSV",
+                data=csv_manual,
+                file_name="hierarchical_predictions_manual.csv",
+                mime="text/csv",
+                key='download-csv-manual'
+            )
+    else:
+        st.warning("⚠️ Please enter at least one item description before submitting.")
+
+# Divider
+st.markdown("---")
+
+# Option 2: File Upload
+st.header("🔹 Option 2: Upload Excel File")
+
+st.subheader("📄 Download Excel Template")
 st.download_button(
     label="Download Template",
     data=generate_template(),
-    file_name="item_categorization_template.xlsx",
+    file_name="hierarchical_categorization_template.xlsx",
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 )
 
-# File upload section
+st.subheader("📤 Upload Your Excel File")
 uploaded_file = st.file_uploader("Upload an Excel file with 'Item Number' and 'Description' columns", type="xlsx")
 
 if uploaded_file is not None:
-    # Load the uploaded file into a DataFrame
-    input_data = pd.read_excel(uploaded_file)
+    try:
+        input_data = pd.read_excel(uploaded_file)
+    except Exception as e:
+        st.error(f"Error reading Excel file: {e}")
+        st.stop()
     
-    # Check if the necessary columns are in the file
-    if 'Item Number' in input_data.columns and 'Description' in input_data.columns:
-        st.write("### Uploaded Data")
-        st.dataframe(input_data.head())
-        
-        # Auto-Suggest Top Three Subcategory-IDs based on the Description
-        input_data['Suggested Subcategory-IDs'] = input_data['Description'].apply(lambda x: predict_top_three_subcategory_ids(x))
-        
-        # Expand the result to display Subcategory-IDs for each suggestion
-        expanded_df = pd.DataFrame(input_data['Suggested Subcategory-IDs'].to_list(), 
-                                   index=input_data.index, 
-                                   columns=['Subcategory-ID 1', 'Subcategory-ID 2', 'Subcategory-ID 3'])
-        
-        # Merge the results back into the original data
-        final_df = pd.concat([input_data[['Item Number', 'Description']], expanded_df], axis=1)
-
-        # Display the final categorized DataFrame
-        st.write("### Final Categorized Items from Excel")
-        st.dataframe(final_df)
-
-        # Export categorized data
-        def convert_df(df):
-            return df.to_csv(index=False).encode('utf-8')
-
-        csv = convert_df(final_df)
-        st.download_button(
-            "Download Categorized Data",
-            csv,
-            "categorized_items_excel.csv",
-            "text/csv",
-            key='download-csv-excel'
-        )
+    required_upload_cols = ['Item Number', 'Description']
+    missing_upload_cols = [col for col in required_upload_cols if col not in input_data.columns]
+    
+    if missing_upload_cols:
+        st.warning(f"The uploaded file is missing the following columns: {', '.join(missing_upload_cols)}")
     else:
-        st.warning("The uploaded file must contain 'Item Number' and 'Description' columns.")
+        with st.spinner("Processing..."):
+            predictions = input_data['Description'].apply(
+                lambda x: pd.Series(hierarchical_prediction(x, category_pipeline, subcat_models, part_term_models))
+            )
+            input_data[['Predicted Subcategory 1', 'Predicted Subcategory 2', 'Predicted Subcategory 3', 
+                        'Predicted Part Terminology 1', 'Predicted Part Terminology 2', 'Predicted Part Terminology 3']] = predictions
+            st.success("### Predicted Subcategories and Part Terminologies")
+            st.dataframe(input_data)
+            
+            # Export as CSV
+            csv_excel = input_data.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                "📥 Download Predictions as CSV",
+                data=csv_excel,
+                file_name="hierarchical_predictions_excel.csv",
+                mime="text/csv",
+                key='download-csv-excel'
+            )
 else:
-    st.info("Please upload an Excel file to get started.")
+    st.info("ℹ️ Please upload an Excel file to get started.")
