@@ -4,3 +4,4 @@ openpyxl
 scikit-learn
 gdown
 xlsxwriter
+numpy
