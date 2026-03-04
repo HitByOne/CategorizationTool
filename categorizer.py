@@ -1,379 +1,348 @@
 import streamlit as st
-import pandas as pd
-import numpy as np
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.svm import LinearSVC
-from sklearn.pipeline import Pipeline
-import io
+import json
+from anthropic import Anthropic
 
-# ==================== CONFIGURATION ====================
+# ==================== PAGE CONFIG ====================
 st.set_page_config(
-    page_title="Item Categorization",
+    page_title="Smart Item Categorizer",
     layout="wide",
-    initial_sidebar_state="collapsed"
+    initial_sidebar_state="expanded"
 )
 
-# ==================== STYLE ====================
-st.markdown("""
-<style>
-body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
-.main { padding: 2rem; }
-h1 { color: #0066cc; margin-bottom: 0.5rem; }
-.stTabs [data-baseweb="tab-list"] button { font-size: 16px; font-weight: 600; }
-</style>
-""", unsafe_allow_html=True)
+st.title("🎯 Smart Item Categorizer")
+st.markdown("Define your categories once, let AI categorize items intelligently")
 
-# ==================== TITLE ====================
-st.title("📦 Item Categorization System")
-st.markdown("Simple machine learning-based product categorizer")
+# ==================== INITIALIZE ANTHROPIC ====================
+client = Anthropic()
 
-# ==================== SAMPLE DATA ====================
-@st.cache_data
-def get_sample_data():
-    """Create diverse training data for better predictions"""
-    data = {
-        'Product Title': [
-            # Fasteners (20 items)
-            'Stainless Steel Bolt M8x20', 'Steel Bolt M10x25', 'Brass Bolt M6x15',
-            'Hex Nut M8 Stainless', 'Hex Nut M10 Steel', 'Washer Steel M8',
-            'Phillips Head Screw 3mm', 'Flathead Screw 4mm', 'Anchor Bolt M12',
-            'Toggle Bolt M6', 'U-Bolt Stainless M10', 'Eye Bolt M8',
-            'Carriage Bolt M10', 'Machine Screw M5', 'Wood Screw 3 inch', 'Rivet Aluminium',
-            'Cone Head Screw', 'T-Nut M8', 'Spring Washer', 'Lock Nut M6',
-            
-            # Adhesives (20 items)
-            'Industrial Epoxy Resin 500ml', 'Two Part Epoxy Glue', 'Cyanoacrylate Super Glue',
-            'Hot Melt Adhesive Sticks', 'Contact Cement Spray', 'Polyurethane Adhesive',
-            'Silicone Sealant White', 'Acrylic Latex Caulk', 'Rubber Cement', 'Waterproof Adhesive',
-            'Double Sided Tape Heavy Duty', 'Flexible Adhesive Sealant', 'Moisture Cure Polyurethane',
-            'Structural Adhesive Paste', 'Peel and Stick Adhesive', 'Foam Tape Double Sided',
-            'Pressure Sensitive Adhesive', 'Vinyl Adhesive', 'Elastic Adhesive', 'Synthetic Adhesive',
-            
-            # Tools (20 items)
-            'Digital Caliper 150mm', 'Vernier Caliper Stainless', 'Micrometer 0-25mm',
-            'Measuring Tape 10m', 'Analog Scale 0-1000g', 'Digital Scale 5kg',
-            'Laser Distance Meter', 'Spirit Level 2m', 'Angle Finder Digital', 'Depth Gauge',
-            'Precision Ruler 300mm', 'Thickness Gauge Digital', 'Pressure Gauge 0-10bar',
-            'Temperature Gun Infrared', 'Multimeter Digital', 'Oscilloscope Probe',
-            'Compass Precision', 'Protractor Metal', 'Straightedge Aluminum', 'Feeler Gauge Set',
-            
-            # Seals (20 items)
-            'Rubber Gasket Nitrile NBR', 'Silicone Gasket Food Grade', 'EPDM Rubber Gasket',
-            'Viton Gasket High Temp', 'Cork Gasket', 'Graphite Gasket',
-            'Oil Seal 30x55x10', 'Mechanical Seal Assembly', 'Spring Seal Unit',
-            'Bellows Seal', 'Labyrinth Seal', 'Packing Ring PTFE',
-            'O-Ring Rubber 10mm', 'X-Ring Seal', 'Spiral Wound Gasket', 'Metal Ring Gasket',
-            'Bonded Seal Washer', 'Compression Seal', 'Lip Seal Assembly', 'Face Seal',
-            
-            # Electrical (20 items)
-            'Copper Wire 2mm Diameter', 'Aluminium Wire 1.5mm', 'Stranded Cable 4mm',
-            'Twisted Pair Cable 10m', 'Coaxial Cable RG-58', 'Shielded Cable',
-            'Fiber Optic Cable', 'USB Extension Cable 5m', 'HDMI Cable 2m', 'Power Cord 3m',
-            'Antenna Cable', 'Network Ethernet Cable', 'Microphone Cable 5m', 'Speaker Wire 2.5mm',
-            'Telephone Cable RJ-11', 'Control Cable Multi-conductor',
-            'Data Cable Ribbon', 'Power Cable Heavy Duty', 'Audio Snake Cable', 'RF Cable',
-            
-            # Plastics (20 items)
-            'PVC Pipe 50mm x 1m', 'PVC Tube 32mm Clear', 'Plastic Sleeve Shrink',
-            'Polycarbonate Sheet 5mm', 'Acrylic Sheet Transparent', 'HDPE Film Roll',
-            'Rubber Hose 10mm', 'Silicone Hose 8mm', 'Vinyl Tubing Clear 6mm',
-            'Plastic Bushing 10mm', 'Polymer Bearing', 'Nylon Spacer Ring',
-            'Delrin Rod 10mm', 'Teflon Washer', 'Plastic Connector 3-way', 'Rubber Damper Block',
-            'PVC Fitting Elbow', 'Plastic Clamp', 'Nylon Collar', 'Polyurethane Wheel',
-        ],
-        'Category': [
-            # Fasteners (20)
-            'Fasteners', 'Fasteners', 'Fasteners',
-            'Fasteners', 'Fasteners', 'Fasteners',
-            'Fasteners', 'Fasteners', 'Fasteners',
-            'Fasteners', 'Fasteners', 'Fasteners',
-            'Fasteners', 'Fasteners', 'Fasteners', 'Fasteners',
-            'Fasteners', 'Fasteners', 'Fasteners', 'Fasteners',
-            
-            # Adhesives (20)
-            'Adhesives', 'Adhesives', 'Adhesives',
-            'Adhesives', 'Adhesives', 'Adhesives',
-            'Adhesives', 'Adhesives', 'Adhesives', 'Adhesives',
-            'Adhesives', 'Adhesives', 'Adhesives',
-            'Adhesives', 'Adhesives', 'Adhesives',
-            'Adhesives', 'Adhesives', 'Adhesives', 'Adhesives',
-            
-            # Tools (20)
-            'Tools', 'Tools', 'Tools',
-            'Tools', 'Tools', 'Tools',
-            'Tools', 'Tools', 'Tools', 'Tools',
-            'Tools', 'Tools', 'Tools',
-            'Tools', 'Tools', 'Tools',
-            'Tools', 'Tools', 'Tools', 'Tools',
-            
-            # Seals (20)
-            'Seals', 'Seals', 'Seals',
-            'Seals', 'Seals', 'Seals',
-            'Seals', 'Seals', 'Seals',
-            'Seals', 'Seals', 'Seals',
-            'Seals', 'Seals', 'Seals', 'Seals',
-            'Seals', 'Seals', 'Seals', 'Seals',
-            
-            # Electrical (20)
-            'Electrical', 'Electrical', 'Electrical',
-            'Electrical', 'Electrical', 'Electrical',
-            'Electrical', 'Electrical', 'Electrical', 'Electrical',
-            'Electrical', 'Electrical', 'Electrical',
-            'Electrical', 'Electrical', 'Electrical',
-            'Electrical', 'Electrical', 'Electrical', 'Electrical',
-            
-            # Plastics (20)
-            'Plastics', 'Plastics', 'Plastics',
-            'Plastics', 'Plastics', 'Plastics',
-            'Plastics', 'Plastics', 'Plastics',
-            'Plastics', 'Plastics', 'Plastics',
-            'Plastics', 'Plastics', 'Plastics', 'Plastics',
-            'Plastics', 'Plastics', 'Plastics', 'Plastics',
-        ],
-        'Subcategory': [
-            # Fasteners (20)
-            'Bolts', 'Bolts', 'Bolts',
-            'Nuts', 'Nuts', 'Washers',
-            'Screws', 'Screws', 'Anchors',
-            'Anchors', 'Bolts', 'Bolts',
-            'Bolts', 'Screws', 'Screws', 'Rivets',
-            'Screws', 'Nuts', 'Washers', 'Nuts',
-            
-            # Adhesives (20)
-            'Epoxy', 'Epoxy', 'Cyanoacrylate',
-            'Hot Melt', 'Spray', 'Polyurethane',
-            'Silicone', 'Caulk', 'Rubber Cement', 'Waterproof',
-            'Tape', 'Sealant', 'Moisture Cure',
-            'Structural', 'Peel Stick', 'Foam Tape',
-            'Pressure Sensitive', 'Vinyl', 'Elastic', 'Synthetic',
-            
-            # Tools (20)
-            'Calipers', 'Calipers', 'Micrometers',
-            'Measuring', 'Scales', 'Digital Scales',
-            'Laser', 'Levels', 'Angle Finder', 'Gauges',
-            'Rulers', 'Digital Gauges', 'Pressure',
-            'Infrared', 'Multimeter', 'Oscilloscope',
-            'Navigation', 'Angle', 'Straightedges', 'Feeler',
-            
-            # Seals (20)
-            'Gaskets', 'Gaskets', 'Gaskets',
-            'Gaskets', 'Gaskets', 'Gaskets',
-            'Oil Seals', 'Mechanical Seals', 'Spring Seals',
-            'Bellows', 'Labyrinth', 'Packing',
-            'O-Rings', 'X-Rings', 'Spiral', 'Metal Rings',
-            'Bonded', 'Compression', 'Lip', 'Face',
-            
-            # Electrical (20)
-            'Wire', 'Wire', 'Cable',
-            'Cable', 'Cable', 'Cable',
-            'Fiber', 'Cable', 'Cable', 'Power',
-            'Antenna', 'Network', 'Audio',
-            'Audio', 'Telecom', 'Control',
-            'Data', 'Power', 'Audio', 'RF',
-            
-            # Plastics (20)
-            'Pipe', 'Tube', 'Shrink',
-            'Sheet', 'Sheet', 'Film',
-            'Hose', 'Hose', 'Tubing',
-            'Bushings', 'Bearings', 'Spacers',
-            'Rod', 'Washer', 'Connectors', 'Dampers',
-            'Fittings', 'Clamps', 'Collars', 'Wheels',
-        ]
-    }
-    return pd.DataFrame(data)
+# ==================== SESSION STATE ====================
+if 'categories' not in st.session_state:
+    st.session_state.categories = {}
+if 'conversation_history' not in st.session_state:
+    st.session_state.conversation_history = []
 
-# ==================== TRAIN MODELS ====================
-@st.cache_resource
-def train_models(data):
-    """Train improved category and subcategory models"""
-    # Category model with better parameters
-    cat_model = Pipeline([
-        ('tfidf', TfidfVectorizer(
-            max_features=200,           # More features for better differentiation
-            ngram_range=(1, 3),         # Include trigrams
-            min_df=1,                   # Include rare words
-            sublinear_tf=True           # Use sublinear term frequency scaling
-        )),
-        ('svm', LinearSVC(
-            max_iter=2000,              # More iterations for better convergence
-            random_state=42,
-            C=0.5,                      # Lower C for more regularization (softer margin)
-            class_weight='balanced'     # Handle imbalanced classes
-        ))
-    ])
-    cat_model.fit(data['Product Title'].values, data['Category'].values)
+# ==================== SIDEBAR: DEFINE CATEGORIES ====================
+st.sidebar.header("📋 Define Your Categories")
+
+with st.sidebar:
+    st.markdown("### Step 1: Create Your Category Structure")
     
-    # Subcategory models (one per category) with better parameters
-    sub_models = {}
-    for category in data['Category'].unique():
-        cat_data = data[data['Category'] == category]
-        n_subcats = len(cat_data['Subcategory'].unique())
+    num_categories = st.number_input(
+        "How many main categories?",
+        min_value=1,
+        max_value=20,
+        value=3,
+        key="num_cat"
+    )
+    
+    categories = {}
+    for i in range(num_categories):
+        col1, col2 = st.columns([2, 1])
         
-        if n_subcats > 1:
-            sub_model = Pipeline([
-                ('tfidf', TfidfVectorizer(
-                    max_features=150,
-                    ngram_range=(1, 2),
-                    min_df=1,
-                    sublinear_tf=True
-                )),
-                ('svm', LinearSVC(
-                    max_iter=2000,
-                    random_state=42,
-                    C=0.5,
-                    class_weight='balanced'
-                ))
-            ])
-            sub_model.fit(cat_data['Product Title'].values, cat_data['Subcategory'].values)
-            sub_models[category] = sub_model
-        else:
-            # Only one subcategory, just store it
-            sub_models[category] = cat_data['Subcategory'].iloc[0]
-    
-    return cat_model, sub_models
-
-# Load data and train
-sample_data = get_sample_data()
-cat_model, sub_models = train_models(sample_data)
-
-# ==================== PREDICTION FUNCTION ====================
-def predict_item(description):
-    """Predict category and subcategory for an item"""
-    try:
-        # Predict category
-        category = cat_model.predict([description])[0]
+        with col1:
+            cat_name = st.text_input(
+                f"Category {i+1} name",
+                value=f"Category {i+1}",
+                key=f"cat_name_{i}"
+            )
         
-        # Predict subcategory
-        if category in sub_models:
-            if isinstance(sub_models[category], str):
-                subcategory = sub_models[category]
-            else:
-                subcategory = sub_models[category].predict([description])[0]
-        else:
-            subcategory = "Unknown"
+        with col2:
+            num_subcats = st.number_input(
+                "Subcats",
+                min_value=0,
+                max_value=10,
+                value=2,
+                key=f"num_subcat_{i}"
+            )
         
-        return category, subcategory, "✓ Success"
-    except Exception as e:
-        return "Error", "Error", f"✗ {str(e)}"
-
-# ==================== USER INTERFACE ====================
-tab1, tab2, tab3 = st.tabs(["📝 Single Item", "📤 Batch Upload", "ℹ️ Info"])
-
-# ==================== TAB 1: SINGLE ITEM ====================
-with tab1:
-    st.subheader("Enter One Item")
+        if cat_name:
+            subcategories = []
+            for j in range(num_subcats):
+                subcat = st.text_input(
+                    f"  └─ Subcategory {j+1}",
+                    value=f"Sub {j+1}",
+                    key=f"subcat_{i}_{j}",
+                    label_visibility="collapsed"
+                )
+                if subcat:
+                    subcategories.append(subcat)
+            
+            categories[cat_name] = subcategories
     
-    col1, col2 = st.columns([3, 1])
+    st.session_state.categories = categories
     
-    with col1:
-        item_input = st.text_input(
-            "Product Description:",
-            placeholder="e.g., Stainless steel fastener M8x20",
-            label_visibility="collapsed"
+    # Add descriptions for each category
+    st.markdown("### Step 2: Add Category Descriptions")
+    st.info("Optional: Add descriptions to help AI understand each category better")
+    
+    category_descriptions = {}
+    for cat_name in categories.keys():
+        desc = st.text_area(
+            f"What is '{cat_name}'?",
+            placeholder="e.g., 'Items used to connect or attach things together'",
+            height=60,
+            key=f"desc_{cat_name}"
         )
+        if desc:
+            category_descriptions[cat_name] = desc
     
-    with col2:
-        predict_btn = st.button("🔍 Predict", use_container_width=True)
-    
-    if predict_btn and item_input:
-        with st.spinner("Processing..."):
-            category, subcategory, status = predict_item(item_input)
-            
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Category", category)
-            with col2:
-                st.metric("Subcategory", subcategory)
-            with col3:
-                st.metric("Status", status)
-    
-    elif predict_btn:
-        st.warning("⚠️ Please enter a product description")
+    st.session_state.category_descriptions = category_descriptions
 
-# ==================== TAB 2: BATCH UPLOAD ====================
-with tab2:
-    st.subheader("Upload Excel File")
-    st.write("Upload a file with columns: **Item Number** and **Description**")
-    
-    uploaded_file = st.file_uploader("Choose Excel file", type=["xlsx", "xls"])
-    
-    if uploaded_file:
-        try:
-            df = pd.read_excel(uploaded_file)
-            
-            if 'Item Number' not in df.columns or 'Description' not in df.columns:
-                st.error("❌ File must have 'Item Number' and 'Description' columns")
-            else:
-                st.write(f"**Loaded {len(df)} items**")
-                
-                if st.button("🚀 Process All", use_container_width=True):
-                    with st.spinner("Processing..."):
-                        results = []
-                        for idx, row in df.iterrows():
-                            cat, subcat, _ = predict_item(row['Description'])
-                            results.append({
-                                'Item Number': row['Item Number'],
-                                'Description': row['Description'],
-                                'Category': cat,
-                                'Subcategory': subcat
-                            })
-                        
-                        results_df = pd.DataFrame(results)
-                        st.success("✓ Complete!")
-                        st.dataframe(results_df, use_container_width=True)
-                        
-                        # Download button
-                        csv = results_df.to_csv(index=False).encode('utf-8')
-                        st.download_button(
-                            "📥 Download CSV",
-                            csv,
-                            "results.csv",
-                            "text/csv",
-                            use_container_width=True
-                        )
+# ==================== MAIN CONTENT ====================
+if not st.session_state.categories:
+    st.warning("⚠️ Please define at least one category in the sidebar first!")
+else:
+    # Show category structure
+    with st.expander("📊 Your Category Structure", expanded=True):
+        col1, col2 = st.columns(2)
         
-        except Exception as e:
-            st.error(f"❌ Error: {str(e)}")
-
-# ==================== TAB 3: INFO ====================
-with tab3:
-    st.subheader("About This App")
-    
-    st.markdown("""
-    ### How It Works
-    This app uses machine learning to automatically categorize products based on their descriptions.
-    
-    ### Features
-    - ✅ Single item prediction
-    - ✅ Batch file processing
-    - ✅ CSV export
-    - ✅ Simple and fast
-    
-    ### Sample Categories
-    The demo includes: Fasteners, Adhesives, Tools, Seals, Electrical, Plastics
-    
-    ### How to Use
-    1. **Single Item**: Enter a product description and click "Predict"
-    2. **Batch**: Upload an Excel file with Item Number and Description columns
-    3. **Download**: Export results as CSV
-    
-    ### Technical Details
-    - **ML Algorithm**: Support Vector Machine (SVM)
-    - **Text Processing**: TF-IDF Vectorization
-    - **Framework**: Streamlit + scikit-learn
-    """)
+        with col1:
+            st.markdown("### Categories")
+            for cat_name, subcats in st.session_state.categories.items():
+                st.markdown(f"**{cat_name}**")
+                for subcat in subcats:
+                    st.markdown(f"  • {subcat}")
+        
+        with col2:
+            st.markdown("### JSON Format")
+            st.code(json.dumps(st.session_state.categories, indent=2), language="json")
     
     st.divider()
     
-    st.markdown("""
-    ### Sample Training Data
-    """)
-    st.dataframe(sample_data, use_container_width=True)
+    # ==================== CATEGORIZATION INTERFACE ====================
+    tab1, tab2 = st.tabs(["🔍 Categorize Items", "💬 Chat History"])
+    
+    with tab1:
+        st.subheader("Enter Items to Categorize")
+        
+        # Build the system prompt
+        category_structure = json.dumps(st.session_state.categories, indent=2)
+        category_descriptions = getattr(st.session_state, 'category_descriptions', {})
+        
+        system_prompt = f"""You are an expert categorization assistant. Your job is to categorize items based on the following structure:
+
+CATEGORY STRUCTURE:
+{category_structure}
+
+CATEGORY DESCRIPTIONS:
+{json.dumps(category_descriptions, indent=2) if category_descriptions else "No additional descriptions provided"}
+
+IMPORTANT RULES:
+1. You MUST respond with valid JSON only, no other text
+2. Each item MUST be categorized into EXACTLY ONE main category and ONE subcategory
+3. If you're unsure, choose the BEST match based on the item's primary purpose
+4. Response format MUST be:
+{{"item": "item name", "category": "main category", "subcategory": "subcategory", "confidence": 0.0-1.0, "reason": "brief explanation"}}
+
+Examples of valid responses:
+{{"item": "Steel Bolt", "category": "Fasteners", "subcategory": "Bolts", "confidence": 0.95, "reason": "Metal fastening device"}}
+{{"item": "Wood Glue", "category": "Adhesives", "subcategory": "Epoxy", "confidence": 0.8, "reason": "Adhesive for bonding"}}
+
+NEVER respond with anything other than valid JSON."""
+
+        col1, col2 = st.columns([4, 1])
+        
+        with col1:
+            item_input = st.text_input(
+                "Enter an item name or description:",
+                placeholder="e.g., Stainless steel hex bolt 10mm",
+                label_visibility="collapsed"
+            )
+        
+        with col2:
+            categorize_btn = st.button("📌 Categorize", use_container_width=True)
+        
+        if categorize_btn and item_input:
+            with st.spinner("🤔 Analyzing..."):
+                try:
+                    # Add user message to history
+                    st.session_state.conversation_history.append({
+                        "role": "user",
+                        "content": f"Categorize this item: {item_input}"
+                    })
+                    
+                    # Get response from Claude
+                    response = client.messages.create(
+                        model="claude-3-5-sonnet-20241022",
+                        max_tokens=500,
+                        system=system_prompt,
+                        messages=st.session_state.conversation_history
+                    )
+                    
+                    assistant_message = response.content[0].text
+                    
+                    # Add assistant response to history
+                    st.session_state.conversation_history.append({
+                        "role": "assistant",
+                        "content": assistant_message
+                    })
+                    
+                    # Parse the JSON response
+                    result = json.loads(assistant_message)
+                    
+                    # Display result with nice formatting
+                    col1, col2, col3, col4 = st.columns(4)
+                    
+                    with col1:
+                        st.metric("Item", result.get("item", "N/A"))
+                    
+                    with col2:
+                        st.metric("Category", result.get("category", "N/A"))
+                    
+                    with col3:
+                        st.metric("Subcategory", result.get("subcategory", "N/A"))
+                    
+                    with col4:
+                        confidence = result.get("confidence", 0)
+                        st.metric("Confidence", f"{int(confidence*100)}%")
+                    
+                    st.info(f"**Reason:** {result.get('reason', 'N/A')}")
+                    
+                    # Allow user to correct if wrong
+                    st.markdown("### Is this correct?")
+                    col1, col2, col3 = st.columns(3)
+                    
+                    with col1:
+                        if st.button("✅ Yes, this is correct", use_container_width=True):
+                            st.success("Great! AI learns from correct categorizations")
+                    
+                    with col2:
+                        if st.button("❌ No, let me correct", use_container_width=True):
+                            st.session_state.show_correction = True
+                    
+                    with col3:
+                        if st.button("🔄 Try again", use_container_width=True):
+                            st.session_state.conversation_history = []
+                            st.rerun()
+                    
+                    # Correction interface
+                    if 'show_correction' in st.session_state and st.session_state.show_correction:
+                        st.markdown("### Correct the categorization")
+                        
+                        correct_category = st.selectbox(
+                            "Select correct category:",
+                            list(st.session_state.categories.keys()),
+                            key="correct_cat"
+                        )
+                        
+                        correct_subcategory = st.selectbox(
+                            "Select correct subcategory:",
+                            st.session_state.categories.get(correct_category, []),
+                            key="correct_subcat"
+                        )
+                        
+                        if st.button("✓ Save Correction", use_container_width=True):
+                            correction_msg = f"You were wrong. '{item_input}' should be categorized as '{correct_category}' / '{correct_subcategory}'"
+                            st.session_state.conversation_history.append({
+                                "role": "user",
+                                "content": correction_msg
+                            })
+                            
+                            ack_response = client.messages.create(
+                                model="claude-3-5-sonnet-20241022",
+                                max_tokens=100,
+                                system="Acknowledge that you've learned from this correction. Respond with: 'Understood. I'll remember that [item] belongs in [category]/[subcategory].'",
+                                messages=st.session_state.conversation_history
+                            )
+                            
+                            st.session_state.conversation_history.append({
+                                "role": "assistant",
+                                "content": ack_response.content[0].text
+                            })
+                            
+                            st.success("✓ Correction saved! AI is learning")
+                            st.session_state.show_correction = False
+                            st.rerun()
+                
+                except json.JSONDecodeError:
+                    st.error("❌ Failed to parse response. Please try again.")
+                except Exception as e:
+                    st.error(f"❌ Error: {str(e)}")
+        
+        # Batch upload
+        st.markdown("---")
+        st.subheader("📤 Batch Categorize")
+        
+        uploaded_file = st.file_uploader("Upload CSV file (with 'Item' column)", type=["csv"])
+        
+        if uploaded_file:
+            try:
+                import pandas as pd
+                df = pd.read_csv(uploaded_file)
+                
+                if 'Item' not in df.columns:
+                    st.error("❌ CSV must have an 'Item' column")
+                else:
+                    items_list = df['Item'].tolist()
+                    
+                    if st.button("🚀 Categorize All", use_container_width=True):
+                        results = []
+                        progress_bar = st.progress(0)
+                        
+                        for idx, item in enumerate(items_list):
+                            try:
+                                response = client.messages.create(
+                                    model="claude-3-5-sonnet-20241022",
+                                    max_tokens=500,
+                                    system=system_prompt,
+                                    messages=[{
+                                        "role": "user",
+                                        "content": f"Categorize this item: {item}"
+                                    }]
+                                )
+                                
+                                result = json.loads(response.content[0].text)
+                                results.append(result)
+                            except Exception as e:
+                                results.append({
+                                    "item": item,
+                                    "category": "Error",
+                                    "subcategory": str(e),
+                                    "confidence": 0,
+                                    "reason": "Failed to categorize"
+                                })
+                            
+                            progress_bar.progress((idx + 1) / len(items_list))
+                        
+                        # Display results
+                        st.success(f"✓ Categorized {len(results)} items")
+                        
+                        results_df = pd.DataFrame(results)
+                        st.dataframe(results_df, use_container_width=True)
+                        
+                        # Download results
+                        csv = results_df.to_csv(index=False).encode('utf-8')
+                        st.download_button(
+                            "📥 Download Results",
+                            csv,
+                            "categorized_items.csv",
+                            "text/csv",
+                            use_container_width=True
+                        )
+            except Exception as e:
+                st.error(f"Error reading file: {str(e)}")
+    
+    with tab2:
+        st.subheader("💬 Conversation History")
+        
+        if not st.session_state.conversation_history:
+            st.info("No conversation yet. Start categorizing items above!")
+        else:
+            for message in st.session_state.conversation_history:
+                if message["role"] == "user":
+                    st.markdown(f"**You:** {message['content']}")
+                else:
+                    st.markdown(f"**AI:** {message['content']}")
+            
+            if st.button("🗑️ Clear History"):
+                st.session_state.conversation_history = []
+                st.rerun()
 
 # ==================== FOOTER ====================
 st.divider()
 st.markdown("""
 <div style='text-align: center; color: #999; font-size: 12px; padding: 20px;'>
-Item Categorization System | Powered by Streamlit & scikit-learn
+Smart Item Categorizer | Powered by Claude AI | 
+<a href='https://anthropic.com' target='_blank'>Anthropic</a>
 </div>
 """, unsafe_allow_html=True)
