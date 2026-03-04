@@ -30,31 +30,154 @@ st.markdown("Simple machine learning-based product categorizer")
 # ==================== SAMPLE DATA ====================
 @st.cache_data
 def get_sample_data():
-    """Create sample training data for demonstration"""
+    """Create diverse training data for better predictions"""
     data = {
         'Product Title': [
-            'Stainless Steel Fastener M8x20', 'Stainless Steel Bolt 10mm',
-            'Industrial Adhesive Epoxy', 'Industrial Glue Type A',
-            'Digital Caliper 150mm', 'Digital Ruler Precision',
-            'Rubber Gasket A', 'Rubber Seal Type B',
-            'Copper Wire 2mm', 'Copper Cable Strand',
-            'Plastic Sleeve 50mm', 'Plastic Tube PVC',
+            # Fasteners (20 items)
+            'Stainless Steel Bolt M8x20', 'Steel Bolt M10x25', 'Brass Bolt M6x15',
+            'Hex Nut M8 Stainless', 'Hex Nut M10 Steel', 'Washer Steel M8',
+            'Phillips Head Screw 3mm', 'Flathead Screw 4mm', 'Anchor Bolt M12',
+            'Toggle Bolt M6', 'U-Bolt Stainless M10', 'Eye Bolt M8',
+            'Carriage Bolt M10', 'Machine Screw M5', 'Wood Screw 3 inch', 'Rivet Aluminium',
+            'Cone Head Screw', 'T-Nut M8', 'Spring Washer', 'Lock Nut M6',
+            
+            # Adhesives (20 items)
+            'Industrial Epoxy Resin 500ml', 'Two Part Epoxy Glue', 'Cyanoacrylate Super Glue',
+            'Hot Melt Adhesive Sticks', 'Contact Cement Spray', 'Polyurethane Adhesive',
+            'Silicone Sealant White', 'Acrylic Latex Caulk', 'Rubber Cement', 'Waterproof Adhesive',
+            'Double Sided Tape Heavy Duty', 'Flexible Adhesive Sealant', 'Moisture Cure Polyurethane',
+            'Structural Adhesive Paste', 'Peel and Stick Adhesive', 'Foam Tape Double Sided',
+            'Pressure Sensitive Adhesive', 'Vinyl Adhesive', 'Elastic Adhesive', 'Synthetic Adhesive',
+            
+            # Tools (20 items)
+            'Digital Caliper 150mm', 'Vernier Caliper Stainless', 'Micrometer 0-25mm',
+            'Measuring Tape 10m', 'Analog Scale 0-1000g', 'Digital Scale 5kg',
+            'Laser Distance Meter', 'Spirit Level 2m', 'Angle Finder Digital', 'Depth Gauge',
+            'Precision Ruler 300mm', 'Thickness Gauge Digital', 'Pressure Gauge 0-10bar',
+            'Temperature Gun Infrared', 'Multimeter Digital', 'Oscilloscope Probe',
+            'Compass Precision', 'Protractor Metal', 'Straightedge Aluminum', 'Feeler Gauge Set',
+            
+            # Seals (20 items)
+            'Rubber Gasket Nitrile NBR', 'Silicone Gasket Food Grade', 'EPDM Rubber Gasket',
+            'Viton Gasket High Temp', 'Cork Gasket', 'Graphite Gasket',
+            'Oil Seal 30x55x10', 'Mechanical Seal Assembly', 'Spring Seal Unit',
+            'Bellows Seal', 'Labyrinth Seal', 'Packing Ring PTFE',
+            'O-Ring Rubber 10mm', 'X-Ring Seal', 'Spiral Wound Gasket', 'Metal Ring Gasket',
+            'Bonded Seal Washer', 'Compression Seal', 'Lip Seal Assembly', 'Face Seal',
+            
+            # Electrical (20 items)
+            'Copper Wire 2mm Diameter', 'Aluminium Wire 1.5mm', 'Stranded Cable 4mm',
+            'Twisted Pair Cable 10m', 'Coaxial Cable RG-58', 'Shielded Cable',
+            'Fiber Optic Cable', 'USB Extension Cable 5m', 'HDMI Cable 2m', 'Power Cord 3m',
+            'Antenna Cable', 'Network Ethernet Cable', 'Microphone Cable 5m', 'Speaker Wire 2.5mm',
+            'Telephone Cable RJ-11', 'Control Cable Multi-conductor',
+            'Data Cable Ribbon', 'Power Cable Heavy Duty', 'Audio Snake Cable', 'RF Cable',
+            
+            # Plastics (20 items)
+            'PVC Pipe 50mm x 1m', 'PVC Tube 32mm Clear', 'Plastic Sleeve Shrink',
+            'Polycarbonate Sheet 5mm', 'Acrylic Sheet Transparent', 'HDPE Film Roll',
+            'Rubber Hose 10mm', 'Silicone Hose 8mm', 'Vinyl Tubing Clear 6mm',
+            'Plastic Bushing 10mm', 'Polymer Bearing', 'Nylon Spacer Ring',
+            'Delrin Rod 10mm', 'Teflon Washer', 'Plastic Connector 3-way', 'Rubber Damper Block',
+            'PVC Fitting Elbow', 'Plastic Clamp', 'Nylon Collar', 'Polyurethane Wheel',
         ],
         'Category': [
-            'Fasteners', 'Fasteners', 
-            'Adhesives', 'Adhesives',
-            'Tools', 'Tools',
-            'Seals', 'Seals',
-            'Electrical', 'Electrical',
-            'Plastics', 'Plastics'
+            # Fasteners (20)
+            'Fasteners', 'Fasteners', 'Fasteners',
+            'Fasteners', 'Fasteners', 'Fasteners',
+            'Fasteners', 'Fasteners', 'Fasteners',
+            'Fasteners', 'Fasteners', 'Fasteners',
+            'Fasteners', 'Fasteners', 'Fasteners', 'Fasteners',
+            'Fasteners', 'Fasteners', 'Fasteners', 'Fasteners',
+            
+            # Adhesives (20)
+            'Adhesives', 'Adhesives', 'Adhesives',
+            'Adhesives', 'Adhesives', 'Adhesives',
+            'Adhesives', 'Adhesives', 'Adhesives', 'Adhesives',
+            'Adhesives', 'Adhesives', 'Adhesives',
+            'Adhesives', 'Adhesives', 'Adhesives',
+            'Adhesives', 'Adhesives', 'Adhesives', 'Adhesives',
+            
+            # Tools (20)
+            'Tools', 'Tools', 'Tools',
+            'Tools', 'Tools', 'Tools',
+            'Tools', 'Tools', 'Tools', 'Tools',
+            'Tools', 'Tools', 'Tools',
+            'Tools', 'Tools', 'Tools',
+            'Tools', 'Tools', 'Tools', 'Tools',
+            
+            # Seals (20)
+            'Seals', 'Seals', 'Seals',
+            'Seals', 'Seals', 'Seals',
+            'Seals', 'Seals', 'Seals',
+            'Seals', 'Seals', 'Seals',
+            'Seals', 'Seals', 'Seals', 'Seals',
+            'Seals', 'Seals', 'Seals', 'Seals',
+            
+            # Electrical (20)
+            'Electrical', 'Electrical', 'Electrical',
+            'Electrical', 'Electrical', 'Electrical',
+            'Electrical', 'Electrical', 'Electrical', 'Electrical',
+            'Electrical', 'Electrical', 'Electrical',
+            'Electrical', 'Electrical', 'Electrical',
+            'Electrical', 'Electrical', 'Electrical', 'Electrical',
+            
+            # Plastics (20)
+            'Plastics', 'Plastics', 'Plastics',
+            'Plastics', 'Plastics', 'Plastics',
+            'Plastics', 'Plastics', 'Plastics',
+            'Plastics', 'Plastics', 'Plastics',
+            'Plastics', 'Plastics', 'Plastics', 'Plastics',
+            'Plastics', 'Plastics', 'Plastics', 'Plastics',
         ],
         'Subcategory': [
-            'Bolts', 'Bolts',
-            'Epoxy', 'Epoxy',
-            'Measuring', 'Measuring',
-            'Gaskets', 'Gaskets',
-            'Conductors', 'Conductors',
-            'Tubes', 'Tubes'
+            # Fasteners (20)
+            'Bolts', 'Bolts', 'Bolts',
+            'Nuts', 'Nuts', 'Washers',
+            'Screws', 'Screws', 'Anchors',
+            'Anchors', 'Bolts', 'Bolts',
+            'Bolts', 'Screws', 'Screws', 'Rivets',
+            'Screws', 'Nuts', 'Washers', 'Nuts',
+            
+            # Adhesives (20)
+            'Epoxy', 'Epoxy', 'Cyanoacrylate',
+            'Hot Melt', 'Spray', 'Polyurethane',
+            'Silicone', 'Caulk', 'Rubber Cement', 'Waterproof',
+            'Tape', 'Sealant', 'Moisture Cure',
+            'Structural', 'Peel Stick', 'Foam Tape',
+            'Pressure Sensitive', 'Vinyl', 'Elastic', 'Synthetic',
+            
+            # Tools (20)
+            'Calipers', 'Calipers', 'Micrometers',
+            'Measuring', 'Scales', 'Digital Scales',
+            'Laser', 'Levels', 'Angle Finder', 'Gauges',
+            'Rulers', 'Digital Gauges', 'Pressure',
+            'Infrared', 'Multimeter', 'Oscilloscope',
+            'Navigation', 'Angle', 'Straightedges', 'Feeler',
+            
+            # Seals (20)
+            'Gaskets', 'Gaskets', 'Gaskets',
+            'Gaskets', 'Gaskets', 'Gaskets',
+            'Oil Seals', 'Mechanical Seals', 'Spring Seals',
+            'Bellows', 'Labyrinth', 'Packing',
+            'O-Rings', 'X-Rings', 'Spiral', 'Metal Rings',
+            'Bonded', 'Compression', 'Lip', 'Face',
+            
+            # Electrical (20)
+            'Wire', 'Wire', 'Cable',
+            'Cable', 'Cable', 'Cable',
+            'Fiber', 'Cable', 'Cable', 'Power',
+            'Antenna', 'Network', 'Audio',
+            'Audio', 'Telecom', 'Control',
+            'Data', 'Power', 'Audio', 'RF',
+            
+            # Plastics (20)
+            'Pipe', 'Tube', 'Shrink',
+            'Sheet', 'Sheet', 'Film',
+            'Hose', 'Hose', 'Tubing',
+            'Bushings', 'Bearings', 'Spacers',
+            'Rod', 'Washer', 'Connectors', 'Dampers',
+            'Fittings', 'Clamps', 'Collars', 'Wheels',
         ]
     }
     return pd.DataFrame(data)
@@ -62,26 +185,49 @@ def get_sample_data():
 # ==================== TRAIN MODELS ====================
 @st.cache_resource
 def train_models(data):
-    """Train simple category and subcategory models"""
-    # Category model
+    """Train improved category and subcategory models"""
+    # Category model with better parameters
     cat_model = Pipeline([
-        ('tfidf', TfidfVectorizer(max_features=100, ngram_range=(1, 2))),
-        ('svm', LinearSVC(max_iter=1000, random_state=42))
+        ('tfidf', TfidfVectorizer(
+            max_features=200,           # More features for better differentiation
+            ngram_range=(1, 3),         # Include trigrams
+            min_df=1,                   # Include rare words
+            sublinear_tf=True           # Use sublinear term frequency scaling
+        )),
+        ('svm', LinearSVC(
+            max_iter=2000,              # More iterations for better convergence
+            random_state=42,
+            C=0.5,                      # Lower C for more regularization (softer margin)
+            class_weight='balanced'     # Handle imbalanced classes
+        ))
     ])
-    cat_model.fit(data['Product Title'], data['Category'])
+    cat_model.fit(data['Product Title'].values, data['Category'].values)
     
-    # Subcategory models (one per category)
+    # Subcategory models (one per category) with better parameters
     sub_models = {}
     for category in data['Category'].unique():
         cat_data = data[data['Category'] == category]
-        if len(cat_data['Subcategory'].unique()) > 1:
+        n_subcats = len(cat_data['Subcategory'].unique())
+        
+        if n_subcats > 1:
             sub_model = Pipeline([
-                ('tfidf', TfidfVectorizer(max_features=100, ngram_range=(1, 2))),
-                ('svm', LinearSVC(max_iter=1000, random_state=42))
+                ('tfidf', TfidfVectorizer(
+                    max_features=150,
+                    ngram_range=(1, 2),
+                    min_df=1,
+                    sublinear_tf=True
+                )),
+                ('svm', LinearSVC(
+                    max_iter=2000,
+                    random_state=42,
+                    C=0.5,
+                    class_weight='balanced'
+                ))
             ])
-            sub_model.fit(cat_data['Product Title'], cat_data['Subcategory'])
+            sub_model.fit(cat_data['Product Title'].values, cat_data['Subcategory'].values)
             sub_models[category] = sub_model
         else:
+            # Only one subcategory, just store it
             sub_models[category] = cat_data['Subcategory'].iloc[0]
     
     return cat_model, sub_models
