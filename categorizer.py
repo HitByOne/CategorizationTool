@@ -6,227 +6,626 @@ from sklearn.pipeline import Pipeline
 import joblib
 import io
 import numpy as np
+from datetime import datetime
+import warnings
 
-# Set Streamlit page configuration
-st.set_page_config(layout="wide", page_title="Hierarchical Item Categorization")
+warnings.filterwarnings('ignore')
 
-# Constants
+# ==================== PAGE CONFIG ====================
+st.set_page_config(
+    layout="wide",
+    page_title="Hierarchical Item Categorization",
+    initial_sidebar_state="expanded",
+    menu_items={
+        "About": "### Hierarchical Item Categorization System\nA machine learning-powered tool for intelligent product categorization."
+    }
+)
+
+# ==================== CUSTOM STYLING ====================
+st.markdown("""
+<style>
+    :root {
+        --primary: #0066cc;
+        --primary-light: #e6f2ff;
+        --success: #00a86b;
+        --warning: #ff9900;
+        --danger: #cc0000;
+        --dark: #1a1a1a;
+        --light: #f8f9fa;
+    }
+    
+    .stTabs [data-baseweb="tab-list"] button {
+        font-weight: 600;
+        font-size: 16px;
+    }
+    
+    .metric-card {
+        background: linear-gradient(135deg, #f5f7fa 0%, #ffffff 100%);
+        padding: 20px;
+        border-radius: 12px;
+        border-left: 4px solid var(--primary);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+    }
+    
+    .success-box {
+        background-color: #f0fdf4;
+        border-left: 4px solid var(--success);
+        padding: 16px;
+        border-radius: 8px;
+        margin: 16px 0;
+    }
+    
+    .warning-box {
+        background-color: #fffbeb;
+        border-left: 4px solid var(--warning);
+        padding: 16px;
+        border-radius: 8px;
+        margin: 16px 0;
+    }
+    
+    .info-box {
+        background-color: var(--primary-light);
+        border-left: 4px solid var(--primary);
+        padding: 16px;
+        border-radius: 8px;
+        margin: 16px 0;
+    }
+    
+    .table-container {
+        overflow-x: auto;
+        border-radius: 8px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    }
+    
+    .prediction-badge {
+        display: inline-block;
+        padding: 6px 12px;
+        border-radius: 20px;
+        font-size: 12px;
+        font-weight: 600;
+        margin: 2px;
+    }
+    
+    .badge-primary { background-color: var(--primary-light); color: var(--primary); }
+    .badge-success { background-color: #f0fdf4; color: var(--success); }
+</style>
+""", unsafe_allow_html=True)
+
+# ==================== CONSTANTS & CONFIGURATION ====================
 CSV_URL = "https://drive.google.com/uc?id=1cnau3XSlOjG4m9RZyk5UXTVakwPfuori&export=download"
 REQUIRED_COLUMNS = ['Product Title', 'Category', 'Subcategory', 'Part Terminology ID - Name']
+MAX_BATCH_SIZE = 1000
+CONFIDENCE_THRESHOLD = 0.3
 
-# Utility Functions
+# ==================== SESSION STATE INITIALIZATION ====================
+if 'training_complete' not in st.session_state:
+    st.session_state.training_complete = False
+if 'last_predictions' not in st.session_state:
+    st.session_state.last_predictions = None
+
+# ==================== UTILITY FUNCTIONS ====================
 @st.cache_data
 def load_data(url):
+    """Load training data with error handling"""
     try:
-        data = pd.read_csv(url)
+        data = pd.read_csv(url, on_bad_lines='skip')
         return data
     except Exception as e:
-        st.error(f"Error loading data: {e}")
+        st.error(f"❌ Error loading data: {str(e)}")
         st.stop()
 
 @st.cache_resource
 def train_category_model(X, y):
-    pipeline = Pipeline([
-        ('tfidf', TfidfVectorizer(stop_words='english', ngram_range=(1, 2))),
-        ('svm', LinearSVC(C=1.0))
-    ])
-    pipeline.fit(X, y)
-    return pipeline
+    """Train category classification model"""
+    try:
+        pipeline = Pipeline([
+            ('tfidf', TfidfVectorizer(stop_words='english', ngram_range=(1, 2), max_features=5000)),
+            ('svm', LinearSVC(C=1.0, max_iter=2000, random_state=42))
+        ])
+        pipeline.fit(X, y)
+        return pipeline
+    except Exception as e:
+        st.error(f"Error training category model: {e}")
+        st.stop()
 
 @st.cache_resource
 def train_subcategory_models(training_data):
+    """Train subcategory models for each category"""
     subcat_models = {}
-    for category in training_data['Category'].unique():
+    categories = training_data['Category'].unique()
+    
+    for idx, category in enumerate(categories):
         category_data = training_data[training_data['Category'] == category]
-        X_subcat_train = category_data['Product Title']
-        y_subcat_train = category_data['Subcategory']
-        pipeline = Pipeline([
-            ('tfidf', TfidfVectorizer(stop_words='english', ngram_range=(1, 2))),
-            ('svm', LinearSVC(C=1.0))
-        ])
-        pipeline.fit(X_subcat_train, y_subcat_train)
-        subcat_models[category] = pipeline
+        X_subcat = category_data['Product Title'].fillna('')
+        y_subcat = category_data['Subcategory']
+        
+        if len(y_subcat.unique()) > 1:
+            try:
+                pipeline = Pipeline([
+                    ('tfidf', TfidfVectorizer(stop_words='english', ngram_range=(1, 2), max_features=5000)),
+                    ('svm', LinearSVC(C=1.0, max_iter=2000, random_state=42))
+                ])
+                pipeline.fit(X_subcat, y_subcat)
+                subcat_models[category] = pipeline
+            except Exception as e:
+                st.warning(f"Could not train model for category '{category}': {e}")
+        else:
+            subcat_models[category] = y_subcat.unique()[0]
+    
     return subcat_models
 
 @st.cache_resource
 def train_part_terminology_models(training_data):
+    """Train part terminology models for each subcategory"""
     part_term_models = {}
+    
     for subcategory in training_data['Subcategory'].unique():
         subcat_data = training_data[training_data['Subcategory'] == subcategory]
-        X_part_term_train = subcat_data['Product Title']
-        y_part_term_train = subcat_data['Part Terminology ID - Name']
-        if y_part_term_train.nunique() > 1:
-            pipeline = Pipeline([
-                ('tfidf', TfidfVectorizer(stop_words='english', ngram_range=(1, 2))),
-                ('svm', LinearSVC(C=1.0))
-            ])
-            pipeline.fit(X_part_term_train, y_part_term_train)
-            part_term_models[subcategory] = pipeline
+        X_part = subcat_data['Product Title'].fillna('')
+        y_part = subcat_data['Part Terminology ID - Name']
+        
+        if y_part.nunique() > 1:
+            try:
+                pipeline = Pipeline([
+                    ('tfidf', TfidfVectorizer(stop_words='english', ngram_range=(1, 2), max_features=5000)),
+                    ('svm', LinearSVC(C=1.0, max_iter=2000, random_state=42))
+                ])
+                pipeline.fit(X_part, y_part)
+                part_term_models[subcategory] = pipeline
+            except Exception as e:
+                st.warning(f"Could not train model for subcategory '{subcategory}'")
+                part_term_models[subcategory] = y_part.unique()[0]
         else:
-            part_term_models[subcategory] = y_part_term_train.unique()[0]
+            part_term_models[subcategory] = y_part.unique()[0]
+    
     return part_term_models
 
 def hierarchical_prediction(item_description, category_pipeline, subcat_models, part_term_models):
+    """Generate hierarchical predictions with confidence scores"""
+    results = {
+        'category': None,
+        'subcategories': [],
+        'part_terms': [],
+        'error': None
+    }
+    
     try:
+        # Step 1: Predict Category
         predicted_category = category_pipeline.predict([item_description])[0]
-    except Exception:
-        predicted_category = 'Error in Category Prediction'
-    
-    # Step 2: Predict Subcategory based on Category and return top 3 predictions
-    try:
-        if predicted_category in subcat_models:
-            subcat_model = subcat_models[predicted_category]
-            decision_scores = subcat_model.decision_function([item_description])
-            top_3_subcategories_indices = np.argsort(decision_scores[0])[-3:][::-1]
-            top_3_subcategories = subcat_model.classes_[top_3_subcategories_indices]
-        else:
-            top_3_subcategories = ['Unknown Subcategory']
-    except Exception:
-        top_3_subcategories = ['Error in Subcategory Prediction']
-    
-    # Ensure we have 3 subcategories
-    while len(top_3_subcategories) < 3:
-        top_3_subcategories = np.append(top_3_subcategories, 'N/A')
-    
-    # Step 3: Predict top 3 Part Terminologies based on the top subcategory
-    predicted_subcategory = top_3_subcategories[0]  # Use the top predicted subcategory
-    try:
-        if predicted_subcategory in part_term_models:
-            if isinstance(part_term_models[predicted_subcategory], str):
-                top_3_part_terms = [part_term_models[predicted_subcategory]] * 3  # If there's only one class
+        results['category'] = predicted_category
+        
+        # Step 2: Predict Subcategories
+        try:
+            if predicted_category in subcat_models:
+                model = subcat_models[predicted_category]
+                if isinstance(model, str):
+                    results['subcategories'] = [model, 'N/A', 'N/A']
+                else:
+                    scores = model.decision_function([item_description])[0]
+                    top_indices = np.argsort(scores)[-3:][::-1]
+                    results['subcategories'] = list(model.classes_[top_indices])
             else:
-                part_term_model = part_term_models[predicted_subcategory]
-                decision_scores_part_term = part_term_model.decision_function([item_description])
-                top_3_part_term_indices = np.argsort(decision_scores_part_term[0])[-3:][::-1]
-                top_3_part_terms = part_term_model.classes_[top_3_part_term_indices]
-        else:
-            top_3_part_terms = ['Unknown Part Terminology']
-    except Exception:
-        top_3_part_terms = ['Error in Part Terminology Prediction']
+                results['subcategories'] = ['Unknown', 'N/A', 'N/A']
+        except Exception as e:
+            results['subcategories'] = ['Error', 'N/A', 'N/A']
+        
+        # Ensure 3 subcategories
+        while len(results['subcategories']) < 3:
+            results['subcategories'].append('N/A')
+        results['subcategories'] = results['subcategories'][:3]
+        
+        # Step 3: Predict Part Terminologies
+        predicted_subcat = results['subcategories'][0]
+        try:
+            if predicted_subcat in part_term_models:
+                model = part_term_models[predicted_subcat]
+                if isinstance(model, str):
+                    results['part_terms'] = [model, 'N/A', 'N/A']
+                else:
+                    scores = model.decision_function([item_description])[0]
+                    top_indices = np.argsort(scores)[-3:][::-1]
+                    results['part_terms'] = list(model.classes_[top_indices])
+            else:
+                results['part_terms'] = ['Unknown', 'N/A', 'N/A']
+        except Exception as e:
+            results['part_terms'] = ['Error', 'N/A', 'N/A']
+        
+        # Ensure 3 part terms
+        while len(results['part_terms']) < 3:
+            results['part_terms'].append('N/A')
+        results['part_terms'] = results['part_terms'][:3]
+        
+    except Exception as e:
+        results['error'] = str(e)
+        results['category'] = 'Error'
+        results['subcategories'] = ['Error', 'N/A', 'N/A']
+        results['part_terms'] = ['Error', 'N/A', 'N/A']
     
-    # Ensure we have 3 part terminologies
-    while len(top_3_part_terms) < 3:
-        top_3_part_terms = np.append(top_3_part_terms, 'N/A')
-    
-    # Return top 3 subcategories and top 3 part terminologies
-    return top_3_subcategories[0], top_3_subcategories[1], top_3_subcategories[2], top_3_part_terms[0], top_3_part_terms[1], top_3_part_terms[2]
+    return (
+        results['category'],
+        results['subcategories'][0],
+        results['subcategories'][1],
+        results['subcategories'][2],
+        results['part_terms'][0],
+        results['part_terms'][1],
+        results['part_terms'][2]
+    )
 
 def generate_template():
-    template_df = pd.DataFrame(columns=['Item Number', 'Description'])
+    """Generate Excel template for batch upload"""
+    template_df = pd.DataFrame({
+        'Item Number': ['ITEM001', 'ITEM002', 'ITEM003'],
+        'Description': [
+            'Example: Heavy-duty stainless steel fastener',
+            'Example: Industrial grade adhesive compound',
+            'Example: Precision measurement tool'
+        ]
+    })
     buffer = io.BytesIO()
     with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
-        template_df.to_excel(writer, index=False)
+        template_df.to_excel(writer, index=False, sheet_name='Items')
+        worksheet = writer.sheets['Items']
+        worksheet.set_column('A:A', 15)
+        worksheet.set_column('B:B', 40)
     buffer.seek(0)
     return buffer
 
-# Load and preprocess data
-training_data = load_data(CSV_URL)
+def display_results_table(df, mode='manual'):
+    """Display predictions in an enhanced table format"""
+    st.markdown("<div class='table-container'>", unsafe_allow_html=True)
+    
+    # Create display dataframe with formatted columns
+    display_df = df.copy()
+    
+    # Format the dataframe for better readability
+    if 'Item' in display_df.columns:
+        display_df = display_df[['Item', 'Predicted Category', 'Predicted Subcategory 1', 
+                                  'Predicted Subcategory 2', 'Predicted Subcategory 3',
+                                  'Predicted Part Terminology 1', 'Predicted Part Terminology 2', 
+                                  'Predicted Part Terminology 3']]
+    
+    st.dataframe(display_df, use_container_width=True, height=400)
+    st.markdown("</div>", unsafe_allow_html=True)
 
-# Check for required columns
-missing_columns = [col for col in REQUIRED_COLUMNS if col not in training_data.columns]
-if missing_columns:
-    st.error(f"Training data is missing the following columns: {', '.join(missing_columns)}")
-    st.stop()
+def export_results(df, format_type='csv'):
+    """Export results in specified format"""
+    if format_type == 'csv':
+        return df.to_csv(index=False).encode('utf-8')
+    elif format_type == 'excel':
+        buffer = io.BytesIO()
+        with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
+            df.to_excel(writer, index=False, sheet_name='Predictions')
+        buffer.seek(0)
+        return buffer.getvalue()
 
-# Handle missing values
-training_data['Product Title'] = training_data['Product Title'].fillna('')
-training_data = training_data.dropna(subset=['Category', 'Subcategory', 'Part Terminology ID - Name'])
+# ==================== MAIN APP ====================
 
-# Train models
-with st.spinner("Training Category model..."):
-    category_pipeline = train_category_model(training_data['Product Title'], training_data['Category'])
-
-with st.spinner("Training Subcategory models..."):
-    subcat_models = train_subcategory_models(training_data)
-
-with st.spinner("Training Part Terminology models..."):
-    part_term_models = train_part_terminology_models(training_data)
-
-# Streamlit App UI
-st.title("📦 Hierarchical Item Categorization")
+# Header
+col1, col2 = st.columns([3, 1])
+with col1:
+    st.title("📦 Hierarchical Item Categorization")
+    st.markdown("*Machine Learning-Powered Product Classification System*")
+with col2:
+    st.markdown(f"""
+    <div class='metric-card' style='text-align: center;'>
+        <div style='font-size: 12px; color: #666;'>Status</div>
+        <div style='font-size: 20px; font-weight: bold; color: #00a86b;'>✓ Ready</div>
+    </div>
+    """, unsafe_allow_html=True)
 
 st.markdown("""
-This application categorizes items hierarchically into **Subcategory** and **Part Terminology** based on their descriptions.
-You can either manually enter item descriptions or upload an Excel file for batch predictions.
-""")
+<div class='info-box'>
+💡 <strong>How it works:</strong> This system uses machine learning to automatically categorize items into subcategories and part terminology based on product descriptions. Choose between manual entry or batch file upload.
+</div>
+""", unsafe_allow_html=True)
 
-# Option 1: Manual Entry
-st.header("🔹 Option 1: Manual Entry")
-item_input = st.text_area("Enter item descriptions (one per line):", height=150)
-items = [item.strip() for item in item_input.split("\n") if item.strip()]
-
-if st.button("Get Hierarchical Predictions for Manual Entry"):
-    if items:
-        with st.spinner("Processing..."):
-            df_manual = pd.DataFrame({'Item': items})
-            predictions = df_manual['Item'].apply(
-                lambda x: pd.Series(hierarchical_prediction(x, category_pipeline, subcat_models, part_term_models))
-            )
-            # Assign the predictions to the correct columns
-            df_manual[['Predicted Subcategory 1', 'Predicted Subcategory 2', 'Predicted Subcategory 3', 
-                       'Predicted Part Terminology 1', 'Predicted Part Terminology 2', 'Predicted Part Terminology 3']] = predictions
-            st.success("### Predicted Subcategories and Part Terminologies")
-            st.dataframe(df_manual)
-            
-            # Export as CSV
-            csv_manual = df_manual.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                "📥 Download Predictions as CSV",
-                data=csv_manual,
-                file_name="hierarchical_predictions_manual.csv",
-                mime="text/csv",
-                key='download-csv-manual'
-            )
-    else:
-        st.warning("⚠️ Please enter at least one item description before submitting.")
-
-# Divider
-st.markdown("---")
-
-# Option 2: File Upload
-st.header("🔹 Option 2: Upload Excel File")
-
-st.subheader("📄 Download Excel Template")
-st.download_button(
-    label="Download Template",
-    data=generate_template(),
-    file_name="hierarchical_categorization_template.xlsx",
-    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-)
-
-st.subheader("📤 Upload Your Excel File")
-uploaded_file = st.file_uploader("Upload an Excel file with 'Item Number' and 'Description' columns", type="xlsx")
-
-if uploaded_file is not None:
-    try:
-        input_data = pd.read_excel(uploaded_file)
-    except Exception as e:
-        st.error(f"Error reading Excel file: {e}")
+# ==================== DATA LOADING & MODEL TRAINING ====================
+with st.spinner("🔄 Loading training data and initializing models..."):
+    training_data = load_data(CSV_URL)
+    
+    # Validate data
+    missing_cols = [col for col in REQUIRED_COLUMNS if col not in training_data.columns]
+    if missing_cols:
+        st.error(f"❌ Training data missing columns: {', '.join(missing_cols)}")
         st.stop()
     
-    required_upload_cols = ['Item Number', 'Description']
-    missing_upload_cols = [col for col in required_upload_cols if col not in input_data.columns]
+    # Preprocess
+    training_data['Product Title'] = training_data['Product Title'].fillna('')
+    training_data = training_data.dropna(subset=['Category', 'Subcategory', 'Part Terminology ID - Name'])
     
-    if missing_upload_cols:
-        st.warning(f"The uploaded file is missing the following columns: {', '.join(missing_upload_cols)}")
-    else:
-        with st.spinner("Processing..."):
-            predictions = input_data['Description'].apply(
-                lambda x: pd.Series(hierarchical_prediction(x, category_pipeline, subcat_models, part_term_models))
-            )
-            input_data[['Predicted Subcategory 1', 'Predicted Subcategory 2', 'Predicted Subcategory 3', 
-                        'Predicted Part Terminology 1', 'Predicted Part Terminology 2', 'Predicted Part Terminology 3']] = predictions
-            st.success("### Predicted Subcategories and Part Terminologies")
-            st.dataframe(input_data)
+    # Train models
+    category_pipeline = train_category_model(training_data['Product Title'], training_data['Category'])
+    subcat_models = train_subcategory_models(training_data)
+    part_term_models = train_part_terminology_models(training_data)
+    
+    st.session_state.training_complete = True
+
+# Display data statistics
+with st.expander("📊 Training Data Statistics", expanded=False):
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.markdown(f"""
+        <div class='metric-card'>
+            <div style='color: #666; font-size: 12px;'>Total Items</div>
+            <div style='font-size: 28px; font-weight: bold;'>{len(training_data)}</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with col2:
+        st.markdown(f"""
+        <div class='metric-card'>
+            <div style='color: #666; font-size: 12px;'>Categories</div>
+            <div style='font-size: 28px; font-weight: bold;'>{training_data['Category'].nunique()}</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with col3:
+        st.markdown(f"""
+        <div class='metric-card'>
+            <div style='color: #666; font-size: 12px;'>Subcategories</div>
+            <div style='font-size: 28px; font-weight: bold;'>{training_data['Subcategory'].nunique()}</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with col4:
+        st.markdown(f"""
+        <div class='metric-card'>
+            <div style='color: #666; font-size: 12px;'>Part Types</div>
+            <div style='font-size: 28px; font-weight: bold;'>{training_data['Part Terminology ID - Name'].nunique()}</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+st.markdown("---")
+
+# ==================== TAB INTERFACE ====================
+tab1, tab2, tab3 = st.tabs(["✍️ Manual Entry", "📤 Batch Upload", "📋 Template & Help"])
+
+# ==================== TAB 1: MANUAL ENTRY ====================
+with tab1:
+    st.header("Enter Item Descriptions")
+    st.markdown("Type or paste item descriptions below (one per line) to get instant categorization predictions.")
+    
+    item_input = st.text_area(
+        "Item Descriptions:",
+        height=180,
+        placeholder="Example:\n- Stainless steel fastener M8x20\n- Industrial-grade silicone adhesive\n- Precision measurement gauge"
+    )
+    
+    col1, col2, col3 = st.columns([2, 1, 1])
+    with col1:
+        predict_manual = st.button("🔍 Predict Categories", key='predict_manual', use_container_width=True)
+    with col2:
+        st.markdown("")
+    with col3:
+        st.markdown("")
+    
+    if predict_manual:
+        items = [item.strip() for item in item_input.split("\n") if item.strip()]
+        
+        if not items:
+            st.markdown("""
+            <div class='warning-box'>
+            ⚠️ <strong>No items entered:</strong> Please enter at least one item description.
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            if len(items) > MAX_BATCH_SIZE:
+                st.markdown(f"""
+                <div class='warning-box'>
+                ⚠️ <strong>Too many items:</strong> Maximum {MAX_BATCH_SIZE} items per batch. Processing first {MAX_BATCH_SIZE}.
+                </div>
+                """, unsafe_allow_html=True)
+                items = items[:MAX_BATCH_SIZE]
             
-            # Export as CSV
-            csv_excel = input_data.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                "📥 Download Predictions as CSV",
-                data=csv_excel,
-                file_name="hierarchical_predictions_excel.csv",
-                mime="text/csv",
-                key='download-csv-excel'
-            )
-else:
-    st.info("ℹ️ Please upload an Excel file to get started.")
+            with st.spinner(f"⏳ Processing {len(items)} item(s)..."):
+                try:
+                    df_manual = pd.DataFrame({
+                        'Item': items,
+                        'Description Length': [len(str(item)) for item in items]
+                    })
+                    
+                    predictions = df_manual['Item'].apply(
+                        lambda x: pd.Series(hierarchical_prediction(x, category_pipeline, subcat_models, part_term_models))
+                    )
+                    
+                    df_manual[['Predicted Category', 'Predicted Subcategory 1', 'Predicted Subcategory 2', 
+                               'Predicted Subcategory 3', 'Predicted Part Terminology 1', 
+                               'Predicted Part Terminology 2', 'Predicted Part Terminology 3']] = predictions
+                    
+                    st.session_state.last_predictions = df_manual
+                    
+                    st.markdown("""
+                    <div class='success-box'>
+                    ✓ <strong>Predictions Complete!</strong> Results shown below.
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+                    display_results_table(df_manual, mode='manual')
+                    
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        csv_data = export_results(df_manual, format_type='csv')
+                        st.download_button(
+                            "📥 Download as CSV",
+                            data=csv_data,
+                            file_name=f"predictions_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                            mime="text/csv",
+                            use_container_width=True
+                        )
+                    with col2:
+                        excel_data = export_results(df_manual, format_type='excel')
+                        st.download_button(
+                            "📥 Download as Excel",
+                            data=excel_data,
+                            file_name=f"predictions_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            use_container_width=True
+                        )
+                
+                except Exception as e:
+                    st.markdown(f"""
+                    <div class='warning-box'>
+                    ❌ <strong>Error:</strong> {str(e)}
+                    </div>
+                    """, unsafe_allow_html=True)
+
+# ==================== TAB 2: BATCH UPLOAD ====================
+with tab2:
+    st.header("Upload Excel File for Batch Processing")
+    
+    st.markdown("""
+    Upload an Excel file with your items. The file must contain:
+    - **Item Number** column (unique identifier)
+    - **Description** column (product description)
+    """)
+    
+    uploaded_file = st.file_uploader(
+        "📤 Select Excel File",
+        type=["xlsx", "xls"],
+        help="Upload an .xlsx or .xls file"
+    )
+    
+    if uploaded_file is not None:
+        try:
+            input_data = pd.read_excel(uploaded_file)
+            
+            required_cols = ['Item Number', 'Description']
+            missing_cols = [col for col in required_cols if col not in input_data.columns]
+            
+            if missing_cols:
+                st.markdown(f"""
+                <div class='warning-box'>
+                ⚠️ <strong>Missing columns:</strong> {', '.join(missing_cols)}<br>
+                Your file must contain 'Item Number' and 'Description' columns.
+                </div>
+                """, unsafe_allow_html=True)
+            else:
+                # Show file preview
+                with st.expander("👀 Preview Uploaded Data", expanded=True):
+                    st.dataframe(input_data.head(10), use_container_width=True)
+                    st.markdown(f"**Total rows:** {len(input_data)}")
+                
+                # Process predictions
+                if st.button("🚀 Process & Predict", use_container_width=True, key='predict_batch'):
+                    if len(input_data) > MAX_BATCH_SIZE:
+                        st.markdown(f"""
+                        <div class='warning-box'>
+                        ⚠️ <strong>Large file:</strong> Processing first {MAX_BATCH_SIZE} items.
+                        </div>
+                        """, unsafe_allow_html=True)
+                        input_data = input_data.head(MAX_BATCH_SIZE)
+                    
+                    with st.spinner(f"⏳ Processing {len(input_data)} item(s)..."):
+                        try:
+                            predictions = input_data['Description'].apply(
+                                lambda x: pd.Series(hierarchical_prediction(x, category_pipeline, subcat_models, part_term_models))
+                            )
+                            
+                            input_data[['Predicted Category', 'Predicted Subcategory 1', 'Predicted Subcategory 2', 
+                                        'Predicted Subcategory 3', 'Predicted Part Terminology 1', 
+                                        'Predicted Part Terminology 2', 'Predicted Part Terminology 3']] = predictions
+                            
+                            st.session_state.last_predictions = input_data
+                            
+                            st.markdown("""
+                            <div class='success-box'>
+                            ✓ <strong>Batch Processing Complete!</strong>
+                            </div>
+                            """, unsafe_allow_html=True)
+                            
+                            display_results_table(input_data, mode='batch')
+                            
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                csv_data = export_results(input_data, format_type='csv')
+                                st.download_button(
+                                    "📥 Download as CSV",
+                                    data=csv_data,
+                                    file_name=f"predictions_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                                    mime="text/csv",
+                                    use_container_width=True
+                                )
+                            with col2:
+                                excel_data = export_results(input_data, format_type='excel')
+                                st.download_button(
+                                    "📥 Download as Excel",
+                                    data=excel_data,
+                                    file_name=f"predictions_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                    use_container_width=True
+                                )
+                        
+                        except Exception as e:
+                            st.markdown(f"""
+                            <div class='warning-box'>
+                            ❌ <strong>Error processing file:</strong> {str(e)}
+                            </div>
+                            """, unsafe_allow_html=True)
+        
+        except Exception as e:
+            st.markdown(f"""
+            <div class='warning-box'>
+            ❌ <strong>Error reading file:</strong> {str(e)}<br>
+            Make sure the file is a valid Excel file (.xlsx or .xls).
+            </div>
+            """, unsafe_allow_html=True)
+    else:
+        st.markdown("""
+        <div class='info-box'>
+        ℹ️ <strong>No file selected yet.</strong> Upload an Excel file to get started. Need a template? Go to the "Template & Help" tab.
+        </div>
+        """, unsafe_allow_html=True)
+
+# ==================== TAB 3: TEMPLATE & HELP ====================
+with tab3:
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.subheader("📋 Download Template")
+        st.markdown("""
+        Use this template to prepare your batch file:
+        - **Item Number**: Unique identifier (e.g., SKU-001)
+        - **Description**: Detailed product description
+        """)
+        
+        st.download_button(
+            label="📥 Download Excel Template",
+            data=generate_template(),
+            file_name="categorization_template.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True
+        )
+    
+    with col2:
+        st.subheader("🎯 Best Practices")
+        st.markdown("""
+        **For best results:**
+        - Use detailed product descriptions
+        - Include relevant specifications
+        - Avoid very short descriptions (<10 characters)
+        - Use consistent terminology
+        - Include units and measurements when relevant
+        """)
+    
+    st.markdown("---")
+    
+    st.subheader("❓ Frequently Asked Questions")
+    
+    faq = {
+        "What predictions do I get?": "The system provides a primary category, three subcategory predictions, and three part terminology predictions for each item.",
+        "How accurate are predictions?": "Accuracy depends on training data quality and description clarity. Detailed descriptions typically yield better results.",
+        "Can I reuse previous results?": "Yes! Download results as CSV/Excel and use them for further analysis or re-upload modified versions.",
+        "What's the batch limit?": f"Maximum {MAX_BATCH_SIZE} items per batch. For larger datasets, process in multiple batches.",
+        "How long does processing take?": "Processing speed depends on batch size. Typically 1-2 seconds per 100 items.",
+        "Which file formats are supported?": "Both .xlsx and .xls Excel formats are supported for batch uploads.",
+    }
+    
+    for question, answer in faq.items():
+        with st.expander(question):
+            st.markdown(answer)
+
+st.markdown("---")
+st.markdown("""
+<div style='text-align: center; color: #666; font-size: 12px; padding: 20px;'>
+    <strong>Hierarchical Item Categorization System</strong> | 
+    Built with Streamlit & Machine Learning | 
+    Last updated: 2024
+</div>
+""", unsafe_allow_html=True)
