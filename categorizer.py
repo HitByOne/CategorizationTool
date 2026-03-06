@@ -99,7 +99,7 @@ st.markdown("""
 # ==================== CONSTANTS & CONFIGURATION ====================
 CSV_URL = "https://drive.google.com/uc?id=1cnau3XSlOjG4m9RZyk5UXTVakwPfuori&export=download"
 REQUIRED_COLUMNS = ['Product Title', 'Category', 'Subcategory', 'Part Terminology ID - Name']
-MAX_BATCH_SIZE = 1000
+MAX_BATCH_SIZE = 5000
 
 # ==================== SESSION STATE INITIALIZATION ====================
 if 'training_complete' not in st.session_state:
